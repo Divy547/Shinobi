@@ -1,6 +1,7 @@
 """Unit tests for the modular analytics services and hard gates evaluator."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from repovet_mcp.models.audit import HardGateStatus
 from repovet_mcp.services.activity_service import ActivityService
@@ -55,8 +56,59 @@ def test_responsiveness_service_bot_filtering() -> None:
 
     assert service.is_bot_user({"login": "dependabot[bot]", "type": "Bot"}) is True
     assert service.is_bot_user({"login": "github-actions", "type": "User"}) is True
+    assert service.is_bot_user({"login": "zulipbot", "type": "User"}) is True
+    assert service.is_bot_user({"login": "k8s-ci-robot", "type": "User"}) is True
+    assert service.is_bot_user({"login": "google-cla", "type": "User"}) is True
+    assert service.is_bot_user({"login": "cla-assistant", "type": "User"}) is True
+    assert service.is_bot_user({"login": "custom-bot", "type": "User"}) is True
+    assert service.is_bot_user({"login": "deploy_bot", "type": "User"}) is True
     assert service.is_bot_user({"login": "alice", "type": "User"}) is False
+    assert service.is_bot_user({"login": "talbot", "type": "User"}) is False
     assert service.is_bot_user(None) is False
+
+
+def test_responsiveness_service_excludes_user_type_bots_and_reports_unobserved() -> None:
+    """Verify comments from User-type bots like zulipbot are excluded and yield unobserved metric."""
+    now = datetime.now(UTC)
+    pr_created = now - timedelta(hours=2)
+    service = ResponsivenessService()
+
+    pull_requests = [
+        {
+            "number": 40617,
+            "created_at": pr_created.isoformat(),
+            "updated_at": (pr_created + timedelta(seconds=6)).isoformat(),
+            "state": "open",
+            "user": {"login": "contributor", "type": "User"},
+        }
+    ]
+    # zulipbot commented 6 seconds after creation
+    sampled_pr_comments = {
+        40617: [
+            {
+                "user": {"login": "zulipbot", "type": "User"},
+                "created_at": (pr_created + timedelta(seconds=6)).isoformat(),
+                "body": "Welcome! Please follow the contribution guide.",
+            }
+        ]
+    }
+    sampled_pr_reviews: dict[int, list[dict[str, Any]]] = {}
+
+    metrics = service.analyze_responsiveness(
+        issues=[],
+        pull_requests=pull_requests,
+        sampled_issue_comments={},
+        sampled_pr_reviews=sampled_pr_reviews,
+        sampled_pr_comments=sampled_pr_comments,
+        now=now,
+    )
+
+    # zulipbot must be excluded, resulting in unobserved human response (None), not 0.0h
+    assert metrics["total_prs_evaluated"] == 1
+    assert metrics["prs_with_human_response_count"] == 0
+    assert metrics["median_pr_first_response_hours"] is None
+    assert metrics["bot_comments_count"] == 1
+    assert metrics["human_comments_count"] == 0
 
 
 def test_responsiveness_service_metrics() -> None:
@@ -114,6 +166,60 @@ def test_documentation_service() -> None:
     assert metrics["has_pr_template"] is True
     assert metrics["has_issue_template"] is True
     assert metrics["has_discussions_enabled"] is True
+
+
+def test_documentation_service_nested_gsoc_discovery() -> None:
+    """Verify discovery of GSoC docs across docs/outreach/, docs/, and .github/."""
+    service = DocumentationService()
+
+    # 1. GSoC doc nested in docs/outreach/ (e.g., Zulip style)
+    nested_zulip = {
+        "docs/outreach": [
+            {"name": "apply.md", "path": "docs/outreach/apply.md"},
+            {"name": "gsoc.md", "path": "docs/outreach/gsoc.md"},
+            {"name": "mentoring.md", "path": "docs/outreach/mentoring.md"},
+        ]
+    }
+    m1 = service.analyze_documentation([], {}, nested_contents=nested_zulip)
+    assert m1["has_gsoc_doc"] is True
+    assert m1["gsoc_doc_path"] == "docs/outreach/gsoc.md"
+
+    # 2. GSoC doc in docs/
+    nested_docs = {
+        "docs": [
+            {"name": "index.md", "path": "docs/index.md"},
+            {"name": "summer-of-code.md", "path": "docs/summer-of-code.md"},
+        ]
+    }
+    m2 = service.analyze_documentation([], {}, nested_contents=nested_docs)
+    assert m2["has_gsoc_doc"] is True
+    assert m2["gsoc_doc_path"] == "docs/summer-of-code.md"
+
+    # 3. GSoC doc in .github/
+    nested_gh = {
+        ".github": [
+            {"name": "GSOC.md", "path": ".github/GSOC.md"},
+        ]
+    }
+    m3 = service.analyze_documentation([], {}, nested_contents=nested_gh)
+    assert m3["has_gsoc_doc"] is True
+    assert m3["gsoc_doc_path"] == ".github/GSOC.md"
+
+
+def test_documentation_service_unknown_when_unverified() -> None:
+    """Verify that absence of GSoC documentation across root and nested dirs reports has_gsoc_doc=False."""
+    service = DocumentationService()
+    root_files = [
+        {"name": "README.md", "type": "file"},
+        {"name": "CONTRIBUTING.md", "type": "file"},
+    ]
+    nested = {
+        "docs": [{"name": "architecture.md", "type": "file"}],
+        ".github": [{"name": "workflows", "type": "dir"}],
+    }
+    metrics = service.analyze_documentation(root_files, {}, nested_contents=nested)
+    assert metrics["has_gsoc_doc"] is False
+    assert metrics["gsoc_doc_path"] is None
 
 
 def test_ci_security_service() -> None:

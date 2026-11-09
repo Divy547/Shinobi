@@ -406,3 +406,95 @@ def test_scoring_engine_community_capped_at_one_without_verified_chat() -> None:
     )
     assert comm_crit.score == 1
     assert "unverified" in comm_crit.rationale.lower()
+
+
+def test_scoring_engine_gsoc_nested_documentation_scored_confirmed() -> None:
+    """Verify that nested GSoC documentation path is reflected in scorecard rationale and scored 2."""
+    data = create_mock_repository_data(has_gsoc_ideas=False)
+    engine = ScoringEngine()
+
+    act = ActivityService().analyze_activity(data["repository"], data["commits"], data["releases"])
+    contrib = ContributorService().analyze_contributors(data["contributors"])
+    resp = ResponsivenessService().analyze_responsiveness(
+        data["issues"],
+        data["pull_requests"],
+        data["sampled_issue_comments"],
+        data["sampled_pr_reviews"],
+        data["sampled_pr_comments"],
+    )
+    newcomer = NewcomerService().analyze_newcomers(data["issues"], data["pull_requests"])
+    doc = DocumentationService().analyze_documentation(
+        data["root_contents"],
+        data["community_profile"],
+        data["repository"],
+        nested_contents={"docs/outreach": [{"name": "gsoc.md", "path": "docs/outreach/gsoc.md"}]},
+    )
+    ci_sec = CISecurityService().analyze_ci_and_security(
+        data["repository"], data["workflows"], data["workflow_runs"], data["root_contents"]
+    )
+
+    scorecard, _, _ = engine.evaluate_scorecard(
+        audit_id="audit_gsoc_nested",
+        activity_metrics=act,
+        contributor_metrics=contrib,
+        responsiveness_metrics=resp,
+        newcomer_metrics=newcomer,
+        documentation_metrics=doc,
+        ci_security_metrics=ci_sec,
+        hard_gates=[],
+        evidence_list=[],
+        raw_repository=data["repository"],
+    )
+
+    gsoc_crit = next(c for c in scorecard.criteria_scores if c.criterion_id == "gsoc_history")
+    assert gsoc_crit.score == 2
+    assert "docs/outreach/gsoc.md" in gsoc_crit.rationale
+    assert "Dedicated GSoC / project ideas document" in gsoc_crit.rationale
+
+
+def test_scoring_engine_pr_first_response_unobserved_when_no_human_responses() -> None:
+    """Verify that when no human PR responses exist, Criterion 4 reports unobserved, not zero hours."""
+    data = create_mock_repository_data()
+    engine = ScoringEngine()
+
+    act = ActivityService().analyze_activity(data["repository"], data["commits"], data["releases"])
+    contrib = ContributorService().analyze_contributors(data["contributors"])
+    resp = {
+        "median_pr_first_response_hours": None,
+        "median_pr_merge_hours": 10.0,
+        "pr_merge_rate": 50.0,
+        "total_prs_evaluated": 10,
+        "prs_with_human_response_count": 0,
+        "stale_prs_count": 0,
+        "median_issue_first_response_hours": 8.0,
+        "unanswered_issue_percentage": 0.0,
+        "open_issues_evaluated": 5,
+        "stale_issues_count": 0,
+        "human_comments_count": 0,
+        "bot_comments_count": 2,
+    }
+    newcomer = NewcomerService().analyze_newcomers(data["issues"], data["pull_requests"])
+    doc = DocumentationService().analyze_documentation(
+        data["root_contents"], data["community_profile"], data["repository"]
+    )
+    ci_sec = CISecurityService().analyze_ci_and_security(
+        data["repository"], data["workflows"], data["workflow_runs"], data["root_contents"]
+    )
+
+    scorecard, _, _ = engine.evaluate_scorecard(
+        audit_id="audit_unobserved_pr",
+        activity_metrics=act,
+        contributor_metrics=contrib,
+        responsiveness_metrics=resp,
+        newcomer_metrics=newcomer,
+        documentation_metrics=doc,
+        ci_security_metrics=ci_sec,
+        hard_gates=[],
+        evidence_list=[],
+        raw_repository={"pull_requests": data["pull_requests"]},
+    )
+
+    pr_crit = next(c for c in scorecard.criteria_scores if c.criterion_id == "pr_first_response")
+    assert pr_crit.score == 0
+    assert "Unobserved" in pr_crit.rationale
+    assert "0.0 hours" not in pr_crit.rationale

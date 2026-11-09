@@ -158,8 +158,9 @@ class VettingToolHandlers:
         issues = raw_data.get("issues", [])
         pulls = raw_data.get("pull_requests", [])
 
+        targeted_contents = raw_data.get("targeted_contents") or raw_data.get("nested_contents", {})
         doc_metrics = self.documentation_service.analyze_documentation(
-            root_contents, community_profile, repo_meta
+            root_contents, community_profile, repo_meta, nested_contents=targeted_contents
         )
         newcomer_metrics = self.newcomer_service.analyze_newcomers(issues, pulls)
 
@@ -199,8 +200,9 @@ class VettingToolHandlers:
             issues, pulls, issue_comments, pr_reviews, pr_comments
         )
         newcomer_metrics = self.newcomer_service.analyze_newcomers(issues, pulls)
+        targeted_contents = raw_data.get("targeted_contents") or raw_data.get("nested_contents", {})
         doc_metrics = self.documentation_service.analyze_documentation(
-            root_contents, community_profile, repo_meta
+            root_contents, community_profile, repo_meta, nested_contents=targeted_contents
         )
         ci_sec_metrics = self.ci_security_service.analyze_ci_and_security(
             repo_meta, workflows, workflow_runs, root_contents
@@ -218,24 +220,33 @@ class VettingToolHandlers:
 
         # Criterion 1 Evidence (Phase 9: GSoC History & Mentorship Track Record)
         has_gsoc_doc = doc_metrics.get("has_gsoc_doc", False)
+        gsoc_doc_path = doc_metrics.get("gsoc_doc_path")
+        gsoc_endpoint = (
+            f"{repo_url}/contents/{gsoc_doc_path}" if gsoc_doc_path else f"{repo_url}/contents"
+        )
+        c1_summary = (
+            f"Dedicated GSoC / project ideas document verified in repository contents ({gsoc_doc_path})."
+            if has_gsoc_doc and gsoc_doc_path
+            else (
+                "Dedicated GSoC / project ideas document verified in repository contents."
+                if has_gsoc_doc
+                else (
+                    "No dedicated GSoC ideas document in repository contents. GSoC status is UNKNOWN "
+                    "(repository-level absence does not preclude participation under an umbrella organization/foundation archives)."
+                )
+            )
+        )
         evidence_list.append(
             EvidenceItem(
                 id=f"{audit_id}_ev_c1_gsoc",
                 phase="phase_9_mentorship_and_gsoc",
                 source_type=EvidenceSourceType.GITHUB_API_REST,
-                source_endpoint=f"{repo_url}/contents",
+                source_endpoint=gsoc_endpoint,
                 collected_at=now,
                 confidence=EvidenceConfidence.CONFIRMED
                 if has_gsoc_doc
                 else EvidenceConfidence.UNKNOWN,
-                summary=(
-                    "Dedicated GSoC / project ideas document verified in repository contents."
-                    if has_gsoc_doc
-                    else (
-                        "No dedicated GSoC ideas document in repository contents. GSoC status is UNKNOWN "
-                        "(repository-level absence does not preclude participation under an umbrella organization/foundation archives)."
-                    )
-                ),
+                summary=c1_summary,
                 verified=has_gsoc_doc,
             )
         )
@@ -276,6 +287,13 @@ class VettingToolHandlers:
         )
 
         # Criterion 4 Evidence (Phase 4: PR First Human Response Time)
+        prs_with_human = resp_metrics.get("prs_with_human_response_count", 0)
+        median_pr_hours = resp_metrics.get("median_pr_first_response_hours")
+        if prs_with_human > 0 and median_pr_hours is not None:
+            c4_summary = f"PR median first human response: {median_pr_hours} hours across {prs_with_human} evaluated reviews."
+        else:
+            c4_summary = f"PR median first human response: unobserved (no human responses observed across {prs_with_human} evaluated PR reviews/comments)."
+
         evidence_list.append(
             EvidenceItem(
                 id=f"{audit_id}_ev_c4_pr_response",
@@ -284,7 +302,7 @@ class VettingToolHandlers:
                 source_endpoint=f"{repo_url}/pulls",
                 collected_at=now,
                 confidence=EvidenceConfidence.CONFIRMED,
-                summary=f"PR median first human response: {resp_metrics.get('median_pr_first_response_hours')} hours across {resp_metrics.get('prs_with_human_response_count')} evaluated reviews.",
+                summary=c4_summary,
                 verified=True,
             )
         )

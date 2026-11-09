@@ -217,3 +217,105 @@ async def test_collect_repository_data_pr_comments_empty_and_api_failure() -> No
         # PR 20 comment call failed, should be omitted without crashing
         assert 20 not in result["sampled_pr_comments"]
         assert len(result["pull_requests"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_collect_repository_data_bounded_targeted_docs_inspection() -> None:
+    """Verify bounded inspection queries docs, docs/outreach, and .github when parent directories exist."""
+    requested_paths: list[str] = []
+
+    def mock_handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        requested_paths.append(path)
+        if path == "/repos/owner/repo":
+            return httpx.Response(200, json={"name": "repo", "owner": {"login": "owner"}})
+        if path == "/repos/owner/repo/contents/":
+            return httpx.Response(
+                200,
+                json=[
+                    {"name": "README.md", "type": "file"},
+                    {"name": "docs", "type": "dir"},
+                    {"name": ".github", "type": "dir"},
+                ],
+            )
+        if path == "/repos/owner/repo/contents/docs":
+            return httpx.Response(
+                200,
+                json=[
+                    {"name": "index.md", "type": "file"},
+                    {"name": "outreach", "type": "dir"},
+                ],
+            )
+        if path == "/repos/owner/repo/contents/docs/outreach":
+            return httpx.Response(
+                200,
+                json=[
+                    {"name": "gsoc.md", "path": "docs/outreach/gsoc.md", "type": "file"},
+                ],
+            )
+        if path == "/repos/owner/repo/contents/.github":
+            return httpx.Response(
+                200,
+                json=[
+                    {"name": "workflows", "type": "dir"},
+                ],
+            )
+        return httpx.Response(200, json=[])
+
+    transport = httpx.MockTransport(mock_handler)
+    gh = GitHubClient()
+    original_client = httpx.AsyncClient
+
+    def mock_async_client(**kwargs: object) -> httpx.AsyncClient:
+        kwargs["transport"] = transport
+        return original_client(**kwargs)  # type: ignore[arg-type]
+
+    import unittest.mock
+
+    with unittest.mock.patch("httpx.AsyncClient", side_effect=mock_async_client):
+        result = await gh.collect_repository_data("owner", "repo")
+        assert "targeted_contents" in result
+        assert "docs" in result["targeted_contents"]
+        assert "docs/outreach" in result["targeted_contents"]
+        assert ".github" in result["targeted_contents"]
+        assert result["targeted_contents"]["docs/outreach"][0]["name"] == "gsoc.md"
+
+
+@pytest.mark.asyncio
+async def test_collect_repository_data_skips_missing_targeted_dirs() -> None:
+    """Verify bounded inspection skips docs/outreach when docs directory is absent in root."""
+    requested_paths: list[str] = []
+
+    def mock_handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        requested_paths.append(path)
+        if path == "/repos/owner/repo":
+            return httpx.Response(200, json={"name": "repo", "owner": {"login": "owner"}})
+        if path == "/repos/owner/repo/contents/":
+            return httpx.Response(
+                200,
+                json=[
+                    {"name": "README.md", "type": "file"},
+                    {"name": "src", "type": "dir"},
+                ],
+            )
+        return httpx.Response(200, json=[])
+
+    transport = httpx.MockTransport(mock_handler)
+    gh = GitHubClient()
+    original_client = httpx.AsyncClient
+
+    def mock_async_client(**kwargs: object) -> httpx.AsyncClient:
+        kwargs["transport"] = transport
+        return original_client(**kwargs)  # type: ignore[arg-type]
+
+    import unittest.mock
+
+    with unittest.mock.patch("httpx.AsyncClient", side_effect=mock_async_client):
+        result = await gh.collect_repository_data("owner", "repo")
+        assert "targeted_contents" in result
+        assert "docs" not in result["targeted_contents"]
+        assert "docs/outreach" not in result["targeted_contents"]
+        assert ".github" not in result["targeted_contents"]
+        assert "/repos/owner/repo/contents/docs" not in requested_paths
+        assert "/repos/owner/repo/contents/docs/outreach" not in requested_paths

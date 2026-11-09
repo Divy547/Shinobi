@@ -303,7 +303,7 @@ Evaluates repository documentation clarity, beginner issues, and newcomer opport
   - `audit_id` *(string, required)*: Identifier of the initialized audit.
 - **Returns**:
   - Presence of `README`, `CONTRIBUTING`, `CODE_OF_CONDUCT`, and setup guides.
-  - GSoC ideas document presence (`has_gsoc_doc`).
+  - GSoC ideas document presence (`has_gsoc_doc`, inspecting root, `docs/outreach/`, `docs/`, and `.github/`).
   - Open beginner-friendly issues (`good first issue`, `help wanted`).
   - Newcomer pull request merge rate.
 

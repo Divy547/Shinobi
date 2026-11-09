@@ -369,6 +369,42 @@ class GitHubClient:
                     except Exception as err:
                         logger.debug("Failed to fetch comments for PR #%d: %s", num, err)
 
+            # 4. Bounded, targeted inspection of documentation directories for GSoC / onboarding guidance
+            targeted_contents: dict[str, list[dict[str, Any]]] = {}
+            candidate_paths = ["docs", "docs/outreach", ".github"]
+            root_dir_names = {
+                item.get("name")
+                for item in (root_contents if isinstance(root_contents, list) else [])
+                if isinstance(item, dict) and item.get("type") == "dir"
+            }
+
+            for t_path in candidate_paths:
+                # Bounded optimization: skip if parent directory definitely does not exist
+                if t_path == "docs" and root_dir_names and "docs" not in root_dir_names:
+                    continue
+                if t_path == "docs/outreach" and (
+                    (root_dir_names and "docs" not in root_dir_names)
+                    or (
+                        "docs" in targeted_contents
+                        and not any(
+                            isinstance(item, dict)
+                            and item.get("name") == "outreach"
+                            and item.get("type") == "dir"
+                            for item in targeted_contents["docs"]
+                        )
+                    )
+                ):
+                    continue
+                if t_path == ".github" and root_dir_names and ".github" not in root_dir_names:
+                    continue
+
+                try:
+                    contents_data = await self.get_contents(client, owner, repo, path=t_path)
+                    if isinstance(contents_data, list):
+                        targeted_contents[t_path] = contents_data
+                except Exception as err:
+                    logger.debug("Failed to fetch targeted contents for %s: %s", t_path, err)
+
             return {
                 "repository": repo_meta,
                 "commits": commits if isinstance(commits, list) else [],
@@ -377,6 +413,7 @@ class GitHubClient:
                 "pull_requests": pull_requests,
                 "releases": releases if isinstance(releases, list) else [],
                 "root_contents": root_contents if isinstance(root_contents, list) else [],
+                "targeted_contents": targeted_contents,
                 "community_profile": community_profile
                 if isinstance(community_profile, dict)
                 else {},

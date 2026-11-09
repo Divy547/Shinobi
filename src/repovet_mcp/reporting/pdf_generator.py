@@ -567,8 +567,11 @@ class PDFReportGenerator:
         commits_str = f"{commits_90d} commits" if commits_90d is not None else "N/A (Unavailable)"
 
         median_pr_resp = resp.get("median_pr_first_response_hours")
+        prs_human_cnt = resp.get("prs_with_human_response_count", 0)
         pr_resp_str = (
-            f"{median_pr_resp} hours" if median_pr_resp is not None else "N/A (No response samples)"
+            f"{median_pr_resp} hours"
+            if (median_pr_resp is not None and prs_human_cnt > 0)
+            else "Unobserved (No human response in sample)"
         )
 
         pr_merge_rate = resp.get("pr_merge_rate")

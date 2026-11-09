@@ -19,6 +19,11 @@ KNOWN_BOT_LOGINS = {
     "snyk-bot",
     "probot",
     "web-flow",
+    "zulipbot",
+    "k8s-ci-robot",
+    "google-cla",
+    "cla-assistant",
+    "boring-cyborg",
 }
 
 
@@ -44,7 +49,15 @@ class ResponsivenessService:
             return True
 
         login = user.get("login", "").lower()
-        if login.endswith("[bot]") or login.endswith("-bot"):
+        if not login:
+            return False
+
+        if (
+            login.endswith("[bot]")
+            or login.endswith("-bot")
+            or login.endswith("_bot")
+            or login.endswith("-robot")
+        ):
             return True
 
         return login in KNOWN_BOT_LOGINS

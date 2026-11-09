@@ -128,27 +128,30 @@ class ScoringEngine:
         # 1. GSoC History & Mentorship Track Record (phase_9_mentorship_and_gsoc)
         # ---------------------------------------------------------------------
         has_gsoc_doc = documentation_metrics.get("has_gsoc_doc", False)
+        gsoc_doc_path = documentation_metrics.get("gsoc_doc_path")
 
         if has_gsoc_doc:
+            path_str = f" ({gsoc_doc_path})" if gsoc_doc_path else ""
             if documentation_metrics.get("has_contributing") and documentation_metrics.get(
                 "has_readme"
             ):
                 c1_score = 2
                 c1_rationale = (
-                    "Dedicated GSoC / project ideas document and structured contribution onboarding "
+                    f"Dedicated GSoC / project ideas document{path_str} and structured contribution onboarding "
                     "verified in repository contents."
                 )
             else:
                 c1_score = 1
                 c1_rationale = (
-                    "Project ideas or mentorship document detected, but formal organization acceptance "
+                    f"Project ideas or mentorship document{path_str} detected, but formal organization acceptance "
                     "requires manual verification against official GSoC archives."
                 )
         else:
             c1_score = 0
             c1_rationale = (
                 "Missing historical GSoC archive evidence: no dedicated GSoC or project ideas document "
-                "verified in repository root. Note: repository-level absence does not confirm absence of GSoC "
+                "verified in repository contents (checked root, docs/, docs/outreach/, .github/). "
+                "Note: repository-level absence does not confirm absence of GSoC "
                 "participation, as projects may participate under an umbrella foundation (e.g., CNCF, Apache Foundation); "
                 "marked UNKNOWN pending manual verification against official GSoC archives."
             )
@@ -234,23 +237,28 @@ class ScoringEngine:
         median_pr_hours = responsiveness_metrics.get("median_pr_first_response_hours")
         prs_sampled = responsiveness_metrics.get("prs_with_human_response_count", 0)
 
-        if median_pr_hours is not None and median_pr_hours <= 72.0:
+        if prs_sampled > 0 and median_pr_hours is not None and median_pr_hours <= 72.0:
             c4_score = 2
             c4_rationale = f"Fast review turnaround: median first human response is {median_pr_hours} hours (<72h)."
-        elif median_pr_hours is not None and median_pr_hours <= 336.0:  # <= 14 days
+        elif (
+            prs_sampled > 0 and median_pr_hours is not None and median_pr_hours <= 336.0
+        ):  # <= 14 days
             c4_score = 1
             c4_rationale = (
                 f"Moderate review speed: median first human response is {median_pr_hours} hours."
             )
-        elif prs_sampled > 0:
+        elif prs_sampled > 0 and median_pr_hours is not None:
             c4_score = 0
             c4_rationale = f"Slow or absent review feedback: median first human response is {median_pr_hours} hours (>14 days)."
         else:
             # No PR human response sample available
-            c4_score = 1 if len(raw_repository.get("pull_requests", [])) == 0 else 0
-            c4_rationale = (
-                "No human pull request review samples were observed in evaluated pull requests."
-            )
+            total_prs_evaluated = responsiveness_metrics.get("total_prs_evaluated")
+            if total_prs_evaluated is None:
+                total_prs_evaluated = newcomer_metrics.get("total_prs_evaluated")
+            if total_prs_evaluated is None:
+                total_prs_evaluated = len(raw_repository.get("pull_requests", []))
+            c4_score = 1 if total_prs_evaluated == 0 else 0
+            c4_rationale = "Unobserved: No human pull request review samples were observed in evaluated pull requests."
 
         criteria_scores.append(
             CriterionScore(

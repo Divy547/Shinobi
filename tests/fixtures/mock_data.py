@@ -238,4 +238,5 @@ def create_mock_repository_data(
         "sampled_issue_comments": sampled_issue_comments,
         "sampled_pr_reviews": sampled_pr_reviews,
         "sampled_pr_comments": sampled_pr_comments,
+        "targeted_contents": {},
     }
