@@ -1,5 +1,7 @@
 """Unit tests to verify clean package imports and baseline data model instantiation."""
 
+import pytest
+
 import repovet_mcp
 from repovet_mcp.config import Settings, get_settings
 from repovet_mcp.models import (
@@ -15,7 +17,7 @@ from repovet_mcp.models import (
     FindingSeverity,
     Scorecard,
 )
-from repovet_mcp.server import create_server
+from repovet_mcp.server import create_server, parse_args
 
 
 def test_package_metadata() -> None:
@@ -100,3 +102,29 @@ def test_server_creation() -> None:
     server = create_server()
     assert server is not None
     assert server.name == "repovet-mcp"
+
+
+def test_cli_parse_args_empty() -> None:
+    """Verify default CLI arguments return without error."""
+    args = parse_args([])
+    assert args is not None
+
+
+def test_cli_parse_args_help(capsys: pytest.CaptureFixture[str]) -> None:
+    """Verify --help outputs usage information and exits immediately with code 0."""
+    with pytest.raises(SystemExit) as exc_info:
+        parse_args(["--help"])
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert "usage:" in captured.out
+    assert "repovet-mcp" in captured.out
+
+
+def test_cli_parse_args_version(capsys: pytest.CaptureFixture[str]) -> None:
+    """Verify --version outputs program version and exits immediately with code 0."""
+    with pytest.raises(SystemExit) as exc_info:
+        parse_args(["--version"])
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert "repovet-mcp" in captured.out
+    assert "0.1.0" in captured.out

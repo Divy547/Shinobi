@@ -90,6 +90,24 @@ pip install -e .
 repovet-mcp --help
 ```
 
+### CLI Usage & Verification
+
+Shinobi provides standard CLI arguments for verification and testing:
+
+```bash
+# Display usage information (exits immediately)
+uv run repovet-mcp --help
+
+# Display installed version (exits immediately)
+uv run repovet-mcp --version
+
+# Start the MCP server over stdio
+uv run repovet-mcp
+```
+
+> [!NOTE]
+> **MCP Server Startup vs. Conventional Terminal Apps**: When started without arguments (`uv run repovet-mcp`), Shinobi initializes its stdio transport and waits for an MCP client (such as Claude Code or Antigravity) to initiate the JSON-RPC handshake. It does not display a conventional command prompt or interactive terminal menu. In contrast, passing `--help` or `--version` outputs information to the terminal and exits immediately.
+
 ### Environment Configuration
 
 Create a `.env` file in the project root:
@@ -139,6 +157,9 @@ go build -o github-mcp-server .
 ## 4. Connect Shinobi to Your AI Client
 
 Shinobi communicates via the standard MCP `stdio` transport. All diagnostic logs are sent to `stderr`, keeping `stdout` clean for JSON-RPC messages.
+
+> [!TIP]
+> **Troubleshooting Server Startup**: If you run `uv run repovet-mcp` directly in your terminal, the process will appear to pause with no output. This is expected: the server is running in stdio transport mode and waiting for an MCP client to send JSON-RPC protocol frames. To verify your installation without an MCP client, use `uv run repovet-mcp --help` or `uv run repovet-mcp --version`.
 
 ### A. Claude Code Configuration
 

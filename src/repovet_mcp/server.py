@@ -1,5 +1,6 @@
 """RepoVet MCP Server entry point."""
 
+import argparse
 import logging
 import sys
 
@@ -8,10 +9,27 @@ try:
 except ImportError:
     from mcp.server.fastmcp import FastMCP as MCPServer  # type: ignore[no-redef]
 
+from repovet_mcp import __version__
 from repovet_mcp.config.settings import Settings, get_settings
 from repovet_mcp.tools.vetting_tools import register_vetting_tools
 
 logger = logging.getLogger("repovet_mcp")
+
+
+def parse_args(args: list[str] | None = None) -> argparse.Namespace:
+    """Parse command-line arguments for the Shinobi MCP server."""
+    parser = argparse.ArgumentParser(
+        prog="repovet-mcp",
+        description="Shinobi (RepoVet MCP): Autonomous Model Context Protocol server for open-source repository vetting.",
+    )
+    parser.add_argument(
+        "-v",
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+        help="Show program version and exit.",
+    )
+    return parser.parse_args(args)
 
 
 def create_server(settings: Settings | None = None) -> MCPServer:
@@ -44,6 +62,8 @@ def create_server(settings: Settings | None = None) -> MCPServer:
 
 def main() -> None:
     """CLI entry point for running the RepoVet MCP server."""
+    parse_args()
+
     settings = get_settings()
     logging.basicConfig(
         level=settings.log_level.upper(),
