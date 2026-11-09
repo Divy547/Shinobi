@@ -150,6 +150,35 @@ def test_hard_gates_service_pass() -> None:
     assert len(findings) == 0
     assert len(evidence) >= 4
 
+    binary_gate = next(g for g in gates if g.gate_id == "untrusted_malicious_code")
+    assert binary_gate.name == "Root Directory Binary Check"
+    assert binary_gate.status == HardGateStatus.PASS
+    assert "No precompiled executable files" in binary_gate.reason
+    assert "subdirectories and package build scripts are not scanned" in binary_gate.reason
+
+
+def test_hard_gates_service_root_binary_failure() -> None:
+    """Verify hard gate failure when a precompiled binary exists in repository root."""
+    data = create_mock_repository_data()
+    data["root_contents"].append({"name": "suspicious_payload.exe", "type": "file"})
+
+    act = ActivityService().analyze_activity(data["repository"], data["commits"], data["releases"])
+    ci_sec = CISecurityService().analyze_ci_and_security(
+        data["repository"], data["workflows"], data["workflow_runs"], data["root_contents"]
+    )
+    assert ci_sec["root_binary_detected"] is True
+
+    service = HardGatesService()
+    gates, evidence, findings = service.evaluate_gates(
+        "test_audit_bin", act, ci_sec, data["repository"]
+    )
+
+    binary_gate = next(g for g in gates if g.gate_id == "untrusted_malicious_code")
+    assert binary_gate.name == "Root Directory Binary Check"
+    assert binary_gate.status == HardGateStatus.FAIL
+    assert "Precompiled binary file(s) detected in repository root" in binary_gate.reason
+    assert any(f.id.endswith("_find_suspicious_binaries") for f in findings)
+
 
 def test_hard_gates_service_unlicensed_failure() -> None:
     """Verify hard gate failure when repository has no license."""

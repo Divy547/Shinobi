@@ -191,6 +191,117 @@ def test_scoring_engine_gsoc_without_doc_scores_zero_and_marked_unknown() -> Non
     assert gsoc_crit.score == 0
     assert "Missing historical GSoC archive evidence" in gsoc_crit.rationale
     assert "UNKNOWN" in gsoc_crit.rationale
+    assert "umbrella foundation" in gsoc_crit.rationale
+
+
+def test_scoring_engine_newcomer_rationale_includes_sample_and_denominator() -> None:
+    """Verify that newcomer PR rationale includes sample size, closed PRs, and evaluated slice."""
+    data = create_mock_repository_data()
+    engine = ScoringEngine()
+
+    act = ActivityService().analyze_activity(data["repository"], data["commits"], data["releases"])
+    contrib = ContributorService().analyze_contributors(data["contributors"])
+    resp = ResponsivenessService().analyze_responsiveness(
+        data["issues"],
+        data["pull_requests"],
+        data["sampled_issue_comments"],
+        data["sampled_pr_reviews"],
+        data["sampled_pr_comments"],
+    )
+    newcomer = NewcomerService().analyze_newcomers(data["issues"], data["pull_requests"])
+    doc = DocumentationService().analyze_documentation(
+        data["root_contents"], data["community_profile"], data["repository"]
+    )
+    ci_sec = CISecurityService().analyze_ci_and_security(
+        data["repository"], data["workflows"], data["workflow_runs"], data["root_contents"]
+    )
+
+    scorecard, _, _ = engine.evaluate_scorecard(
+        audit_id="audit_newcomer_rat",
+        activity_metrics=act,
+        contributor_metrics=contrib,
+        responsiveness_metrics=resp,
+        newcomer_metrics=newcomer,
+        documentation_metrics=doc,
+        ci_security_metrics=ci_sec,
+        hard_gates=[],
+        evidence_list=[],
+        raw_repository=data["repository"],
+    )
+
+    newcomer_crit = next(
+        c for c in scorecard.criteria_scores if c.criterion_id == "newcomer_prs_merged"
+    )
+    assert "merged out of" in newcomer_crit.rationale
+    assert "newcomer PRs evaluated in" in newcomer_crit.rationale
+
+
+def test_scoring_engine_newcomer_denominator_closed_vs_evaluated() -> None:
+    """Verify that newcomer PR merge-rate denominator is closed newcomer PRs, with total evaluated visible."""
+    # Scenario: 100 recent PRs evaluated.
+    # 15 are newcomer PRs: 3 open, 12 closed, 0 merged.
+    pull_requests = []
+    # 3 open newcomer PRs
+    for i in range(1, 4):
+        pull_requests.append(
+            {
+                "number": i,
+                "state": "open",
+                "user": {"login": f"newbie_{i}", "type": "User"},
+                "author_association": "FIRST_TIME_CONTRIBUTOR",
+                "merged_at": None,
+            }
+        )
+    # 12 closed newcomer PRs (none merged)
+    for i in range(4, 16):
+        pull_requests.append(
+            {
+                "number": i,
+                "state": "closed",
+                "user": {"login": f"newbie_{i}", "type": "User"},
+                "author_association": "NONE",
+                "merged_at": None,
+            }
+        )
+    # 85 member PRs to reach 100 total
+    for i in range(16, 101):
+        pull_requests.append(
+            {
+                "number": i,
+                "state": "closed",
+                "user": {"login": f"maintainer_{i}", "type": "User"},
+                "author_association": "MEMBER",
+                "merged_at": "2026-11-01T00:00:00Z",
+            }
+        )
+
+    newcomer_service = NewcomerService()
+    newcomer_metrics = newcomer_service.analyze_newcomers(issues=[], pull_requests=pull_requests)
+
+    assert newcomer_metrics["newcomer_prs_sample_count"] == 15
+    assert newcomer_metrics["newcomer_prs_closed"] == 12
+    assert newcomer_metrics["newcomer_prs_merged"] == 0
+    assert newcomer_metrics["newcomer_merge_rate"] == 0.0
+
+    engine = ScoringEngine()
+    scorecard, _, _ = engine.evaluate_scorecard(
+        audit_id="audit_denominator_check",
+        activity_metrics={},
+        contributor_metrics={},
+        responsiveness_metrics={},
+        newcomer_metrics=newcomer_metrics,
+        documentation_metrics={},
+        ci_security_metrics={},
+        hard_gates=[],
+        evidence_list=[],
+        raw_repository={"pull_requests": pull_requests},
+    )
+
+    newcomer_crit = next(
+        c for c in scorecard.criteria_scores if c.criterion_id == "newcomer_prs_merged"
+    )
+    expected_rationale = "Zero newcomer PRs merged out of 12 closed newcomer PRs (15 evaluated in the 100 most recent PRs)."
+    assert newcomer_crit.rationale == expected_rationale
 
 
 def test_scoring_engine_community_capped_at_one_without_verified_chat() -> None:

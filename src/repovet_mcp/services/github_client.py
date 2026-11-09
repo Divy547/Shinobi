@@ -363,12 +363,11 @@ class GitHubClient:
                         sampled_pr_reviews[num] = reviews_data
                     except Exception as err:
                         logger.debug("Failed to fetch reviews for PR #%d: %s", num, err)
-                    if pr.get("comments", 0) > 0:
-                        try:
-                            comments_data = await self.get_issue_comments(client, owner, repo, num)
-                            sampled_pr_comments[num] = comments_data
-                        except Exception as err:
-                            logger.debug("Failed to fetch comments for PR #%d: %s", num, err)
+                    try:
+                        comments_data = await self.get_issue_comments(client, owner, repo, num)
+                        sampled_pr_comments[num] = comments_data
+                    except Exception as err:
+                        logger.debug("Failed to fetch comments for PR #%d: %s", num, err)
 
             return {
                 "repository": repo_meta,

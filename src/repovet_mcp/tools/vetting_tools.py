@@ -231,7 +231,10 @@ class VettingToolHandlers:
                 summary=(
                     "Dedicated GSoC / project ideas document verified in repository contents."
                     if has_gsoc_doc
-                    else "No confirmed GSoC archive record or project ideas document in repository contents; GSoC status is unverified."
+                    else (
+                        "No dedicated GSoC ideas document in repository contents. GSoC status is UNKNOWN "
+                        "(repository-level absence does not preclude participation under an umbrella organization/foundation archives)."
+                    )
                 ),
                 verified=has_gsoc_doc,
             )
@@ -301,6 +304,11 @@ class VettingToolHandlers:
         )
 
         # Criterion 6 Evidence (Phase 6: Newcomer PRs Acceptance & Merge Rate)
+        newcomer_sample = newcomer_metrics.get("newcomer_prs_sample_count", 0)
+        newcomer_closed = newcomer_metrics.get("newcomer_prs_closed", 0)
+        newcomer_merged = newcomer_metrics.get("newcomer_prs_merged", 0)
+        newcomer_rate = newcomer_metrics.get("newcomer_merge_rate", 0.0)
+        total_prs = len(raw_data.get("pull_requests", []))
         evidence_list.append(
             EvidenceItem(
                 id=f"{audit_id}_ev_c6_newcomer_prs",
@@ -309,7 +317,10 @@ class VettingToolHandlers:
                 source_endpoint=f"{repo_url}/pulls",
                 collected_at=now,
                 confidence=EvidenceConfidence.CONFIRMED,
-                summary=f"Newcomer PRs merged: {newcomer_metrics.get('newcomer_prs_merged')}. Newcomer merge rate: {newcomer_metrics.get('newcomer_merge_rate')}%.",
+                summary=(
+                    f"Newcomer PRs: {newcomer_merged} merged out of {newcomer_closed} closed newcomer PRs "
+                    f"({newcomer_rate}% merge rate across {newcomer_sample} newcomer PRs identified in {total_prs} recent PRs)."
+                ),
                 verified=True,
             )
         )
@@ -515,7 +526,7 @@ def register_vetting_tools(
         name="check_hard_gates",
         description=(
             "Evaluate mandatory eligibility gates (OSI-approved license, dormancy/recent commits, "
-            "default branch CI pass/fail, and installation safety). Returns pass/fail status and critical blockers."
+            "default branch CI pass/fail, and root directory binary checks). Returns pass/fail status and critical blockers."
         ),
     )
     async def check_hard_gates(audit_id: str) -> dict[str, Any]:
@@ -609,8 +620,9 @@ def register_vetting_tools(
     @server.tool(
         name="generate_pdf_report",
         description=(
-            "Generate an executive, tamper-evident multi-section PDF audit report in reports/generated/ "
-            "with verdict, scorecard, hard gates, and full evidence appendix, updating the SHA-256 integrity manifest."
+            "Generate an executive multi-section PDF audit report in reports/generated/ "
+            "with verdict, scorecard, hard gates, and full evidence appendix. "
+            "Note: The compiled PDF report is generated in reports/generated/ and is outside the data/ SHA-256 integrity manifest."
         ),
     )
     async def generate_pdf_report(audit_id: str) -> dict[str, Any]:

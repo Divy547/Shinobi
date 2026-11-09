@@ -221,11 +221,12 @@ class StorageService:
         return manifest_data
 
     def verify_audit_reproducibility(self, audit_id: str) -> dict[str, Any]:
-        """Verify an audit's integrity against its baseline manifest.json and detect tampering.
+        """Verify artifact integrity of stored audit contracts (raw_data.json, audit.json, evidence.json) against manifest.json for tamper detection.
 
         Detects modified files, truncated files, deleted files, corrupted manifests, and audits
-        predating manifests. Local manifests are not cryptographically signed and detect local
-        file changes, not host-compromise attacks.
+        predating manifests. Evaluates artifact integrity rather than external execution reproducibility.
+        Note: The compiled PDF report resides in reports/generated/ and is outside the data/ integrity manifest.
+        Local manifests are not cryptographically signed and detect local file changes, not host-compromise attacks.
         """
         audit_dir = self._get_audit_dir(audit_id)
         manifest_path = audit_dir / MANIFEST_FILENAME

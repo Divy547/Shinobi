@@ -67,17 +67,17 @@ class CISecurityService:
 
         ci_passing_on_default = latest_ci_conclusion == "success" if latest_default_run else None
 
-        # 4. Safe Read-Only Installation Safety Check
-        suspicious_install_scripts = False
-        suspicious_reasons: list[str] = []
+        # 4. Safe Read-Only Root Directory Binary Check
+        root_binary_detected = False
+        detected_root_binaries: list[str] = []
 
-        # Inspect root files for unusual executable binary patterns
+        # Inspect root directory file names for precompiled binary extensions
         binary_extensions = {".exe", ".dll", ".so", ".bin", ".out"}
         for name in files_map:
             if any(name.endswith(ext) for ext in binary_extensions):
-                suspicious_install_scripts = True
-                suspicious_reasons.append(
-                    f"Pre-compiled binary detected in repository root: {name}"
+                root_binary_detected = True
+                detected_root_binaries.append(
+                    f"Precompiled binary detected in repository root: {name}"
                 )
 
         return {
@@ -92,6 +92,8 @@ class CISecurityService:
             "failed_runs_count": failed_runs,
             "ci_passing_on_default_branch": ci_passing_on_default,
             "latest_default_branch_ci_conclusion": latest_ci_conclusion,
-            "suspicious_install_scripts": suspicious_install_scripts,
-            "suspicious_reasons": suspicious_reasons,
+            "root_binary_detected": root_binary_detected,
+            "detected_root_binaries": detected_root_binaries,
+            "suspicious_install_scripts": root_binary_detected,  # Backward compatibility
+            "suspicious_reasons": detected_root_binaries,
         }

@@ -18,7 +18,7 @@ Shinobi runs over the standard MCP stdio transport, exposing seven deterministic
 - **Strict Untrusted Code Policy**: Audited codebases are treated as untrusted user input. Shinobi **never** executes external build scripts, shell commands, test runners, or install hooks. Repositories are inspected solely through safe read-only GitHub REST APIs and static AST analysis.
 - **SSRF & Path Traversal Immunity**: URL parsing strictly whitelists authorized GitHub domains (`github.com`, `www.github.com`). Storage paths and audit IDs are strictly validated (`^[a-zA-Z0-9_\-]{1,128}$`) and resolved safely within base directories.
 - **Credential & Secret Redaction**: All error logs, exception messages, and protocol payloads automatically mask GitHub personal access tokens (`ghp_`, `github_pat_`), Bearer authorization headers, and API keys.
-- **Atomic Writes & Audit Reproducibility**: Audit data, raw payloads, and scorecards are written atomically via temporary files and `os.replace`. Raw API snapshots in `data/<audit_id>/` guarantee 100% offline audit reproducibility with SHA-256 verification.
+- **Atomic Writes & Artifact Integrity Manifests**: Audit data, raw payloads, and scorecards are written atomically via temporary files and `os.replace`. A SHA-256 manifest in `data/<audit_id>/manifest.json` provides tamper detection for stored audit contracts (`raw_data.json`, `audit.json`, `evidence.json`). Note: compiled PDF reports in `reports/generated/` are stored outside this manifest.
 - **Publication-Quality PDF Reports**: Multi-page PDF reports generated with ReportLab feature dynamic page headers/footers, XML-sanitized text cells, multi-page table pagination (`repeatRows=1`), and automated structural validation.
 
 ---
@@ -284,7 +284,7 @@ Evaluates mandatory eligibility gates that instantly disqualify a repository or 
   1. *License Validity*: Ensures an OSI-approved permissive/copyleft license exists.
   2. *Repository Dormancy*: Ensures commits exist within the last 365 days.
   3. *Default Branch CI*: Verifies default branch builds are passing if CI workflows exist.
-  4. *Installation Safety*: Confirms no precompiled binaries or install hooks compromise safety.
+  4. *Root Directory Binary Check*: Confirms no precompiled executable files (.exe, .dll, .so, .bin, .out) reside in the repository root. Note: subdirectories and package build scripts are not scanned.
 - **Returns**: Individual gate outcomes (`PASS`, `FAIL`, `UNKNOWN`), severity, evaluation rationale, and blockers count.
 
 ### 3. `calculate_responsiveness`
@@ -358,9 +358,9 @@ Compiles an executive multi-section PDF audit report in `reports/generated/`.
 
 ---
 
-## Storage & Audit Integrity Manifest
+## Storage & Artifact Integrity Manifest
 
-Audit data and reproducibility baselines are stored under `data/<audit_id>/` with strict filesystem isolation:
+Audit data contracts and baseline digests are stored under `data/<audit_id>/` with strict filesystem isolation:
 
 ```text
 data/
@@ -371,10 +371,13 @@ data/
     └── manifest.json   # Persisted integrity manifest with SHA-256 and byte sizes
 ```
 
+> [!NOTE]
+> **Manifest Scope & PDF Reports**: The SHA-256 integrity manifest specifically tracks stored audit data contracts (`raw_data.json`, `audit.json`, and `evidence.json`) in `data/<audit_id>/`. The compiled ReportLab PDF report is generated separately under `reports/generated/` and is outside this data manifest.
+
 - **Integrity Manifest (`manifest.json`)**:
   Generated atomically upon audit completion (`calculate_scorecard`). Records baseline SHA-256 digests and file sizes for `raw_data.json`, `audit.json`, and `evidence.json`.
 - **Tamper & Corruption Detection**:
-  `StorageService.verify_audit_reproducibility(audit_id)` evaluates stored files against the baseline manifest, returning explicit integrity metadata:
+  `StorageService.verify_audit_reproducibility(audit_id)` evaluates stored files against the baseline manifest, returning explicit artifact integrity metadata:
   - `VERIFIED`: All tracked files exist, byte counts match, and SHA-256 checksums match perfectly (`is_tampered: False`, `is_reproducible: True`).
   - `TAMPERED`: Any file was modified, truncated, deleted, or size/hash mismatch detected (`is_tampered: True`, `is_reproducible: False`).
   - `CORRUPTED_MANIFEST`: The `manifest.json` file is malformed, truncated, empty, or missing tracked entries (`is_tampered: True`, `is_reproducible: False`).
@@ -385,7 +388,7 @@ data/
 - **Corruption Resilience**: Zero-byte, empty, or unparseable JSON files trigger `StorageCorruptionError` without server crashes.
 
 > [!WARNING]
-> **Local Integrity Manifest Disclaimer**: Local manifests stored alongside audit files are not cryptographically signed. They detect accidental corruption, truncation, deletions, or subsequent modifications in the local environment, but do not protect against an attacker who possesses host write access to both the manifest and the data files.
+> **Local Integrity Manifest Disclaimer**: Local manifests stored alongside audit files are not cryptographically signed. They detect accidental corruption, truncation, deletions, or subsequent modifications in the local environment, but do not protect against an attacker who possesses host write access to both the manifest and the data files. They establish stored artifact integrity rather than execution reproducibility across shifting network states or environments.
 
 ---
 

@@ -866,9 +866,11 @@ class PDFReportGenerator:
                         "<b>Untrusted Repository Code Policy:</b> RepoVet MCP adheres strictly to a zero-execution policy. "
                         "Under no circumstances are external scripts, test runners, or build hooks from audited codebases executed. "
                         "All findings are derived exclusively through safe read-only API inspection and static analysis.<br/>"
-                        "<b>GSoC Mentorship & Community Channel Verification:</b> GSoC organization status is verified only when primary project ideas documents exist in repository contents; otherwise marked UNKNOWN pending verification against official Google Summer of Code archives. Similarly, GitHub Discussions and real-time chat (Discord/Slack/Matrix) interaction tone cannot be verified via public REST API endpoints and are scored conservatively.<br/>"
-                        "<b>Determinism:</b> All numeric scores and velocity metrics are calculated deterministically in Python "
-                        "and are 100% reproducible from cached raw payloads in <code>data/</code>.",
+                        "<b>GSoC Mentorship & Community Channel Verification:</b> GSoC organization status is verified only when primary project ideas documents exist in repository contents; otherwise marked UNKNOWN pending verification against official Google Summer of Code archives. Note: repository-level absence does not preclude participation under an umbrella organization or foundation. Similarly, GitHub Discussions and real-time chat (Discord/Slack/Matrix) interaction tone cannot be verified via public REST API endpoints and are scored conservatively.<br/>"
+                        "<b>Artifact Integrity & Determinism:</b> All numeric scores and velocity metrics are calculated deterministically. "
+                        "Stored audit contracts (<code>raw_data.json</code>, <code>audit.json</code>, <code>evidence.json</code>) in <code>data/</code> "
+                        "are hashed with SHA-256 for tamper detection. Note: this compiled PDF report is generated under <code>reports/generated/</code> "
+                        "and is outside the <code>data/</code> integrity manifest.",
                         styles["Body"],
                     ),
                 ]

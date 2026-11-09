@@ -69,8 +69,8 @@ critical_disqualifiers:
     severity: "HIGH"
 
   - id: "untrusted_malicious_code"
-    name: "Suspicious or Obfuscated Code Patterns"
-    condition: "Potential security anomaly or suspicious build-time script detected."
+    name: "Root Directory Binary Check"
+    condition: "Precompiled executable file (.exe, .dll, .so, .bin, .out) detected in repository root directory."
     action: "FORCE_DECISION"
     target_decision: "NEEDS_MANUAL_REVIEW"
     severity: "CRITICAL"

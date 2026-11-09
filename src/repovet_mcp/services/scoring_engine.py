@@ -147,8 +147,9 @@ class ScoringEngine:
         else:
             c1_score = 0
             c1_rationale = (
-                "Missing historical GSoC archive evidence. Actual GSoC organization participation "
-                "cannot be inferred from repository labels, topics, or generic newcomer issues; "
+                "Missing historical GSoC archive evidence: no dedicated GSoC or project ideas document "
+                "verified in repository root. Note: repository-level absence does not confirm absence of GSoC "
+                "participation, as projects may participate under an umbrella foundation (e.g., CNCF, Apache Foundation); "
                 "marked UNKNOWN pending manual verification against official GSoC archives."
             )
 
@@ -294,21 +295,38 @@ class ScoringEngine:
             )
         )
 
-        # ---------------------------------------------------------------------
+        # -------------------------------------------------------------
         # 6. Newcomer PRs Acceptance & Merge Rate (phase_6_issue_hygiene_and_accessibility)
-        # ---------------------------------------------------------------------
+        # -------------------------------------------------------------
         newcomer_merged = newcomer_metrics.get("newcomer_prs_merged", 0)
+        newcomer_closed = newcomer_metrics.get("newcomer_prs_closed", 0)
+        newcomer_sample = newcomer_metrics.get("newcomer_prs_sample_count", 0)
         newcomer_rate = newcomer_metrics.get("newcomer_merge_rate", 0.0)
+        total_prs = len(raw_repository.get("pull_requests", []))
 
         if newcomer_merged >= 5 or (newcomer_rate >= 60.0 and newcomer_merged >= 2):
             c6_score = 2
-            c6_rationale = f"Active newcomer acceptance: {newcomer_merged} external PRs merged with {newcomer_rate}% merge rate."
+            c6_rationale = (
+                f"Active newcomer acceptance: {newcomer_merged} merged out of {newcomer_closed} closed newcomer PRs "
+                f"({newcomer_rate}% merge rate across {newcomer_sample} newcomer PRs evaluated in {total_prs} recent PRs)."
+            )
         elif newcomer_merged >= 1:
             c6_score = 1
-            c6_rationale = f"Selective newcomer merging: {newcomer_merged} newcomer PRs merged ({newcomer_rate}% acceptance)."
+            c6_rationale = (
+                f"Selective newcomer merging: {newcomer_merged} merged out of {newcomer_closed} closed newcomer PRs "
+                f"({newcomer_rate}% acceptance rate across {newcomer_sample} newcomer PRs evaluated in {total_prs} recent PRs)."
+            )
         else:
             c6_score = 0
-            c6_rationale = "Zero newcomer PRs merged in the evaluated pull request sample."
+            if newcomer_closed > 0:
+                c6_rationale = (
+                    f"Zero newcomer PRs merged out of {newcomer_closed} closed newcomer PRs "
+                    f"({newcomer_sample} evaluated in the {total_prs} most recent PRs)."
+                )
+            elif newcomer_sample > 0:
+                c6_rationale = f"Zero closed newcomer PRs observed ({newcomer_sample} open newcomer PRs evaluated in the {total_prs} most recent PRs)."
+            else:
+                c6_rationale = f"Zero newcomer PRs identified in the {total_prs} evaluated pull request sample."
 
         criteria_scores.append(
             CriterionScore(

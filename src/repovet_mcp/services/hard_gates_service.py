@@ -269,10 +269,15 @@ class HardGatesService:
             )
 
         # -------------------------------------------------------------
-        # 4. Safe Read-Only Installation & Code Pattern Gate
+        # 4. Root Directory Binary Check Gate
         # -------------------------------------------------------------
-        suspicious = ci_security_metrics.get("suspicious_install_scripts", False)
-        reasons = ci_security_metrics.get("suspicious_reasons", [])
+        suspicious = bool(
+            ci_security_metrics.get("root_binary_detected")
+            or ci_security_metrics.get("suspicious_install_scripts", False)
+        )
+        reasons = ci_security_metrics.get("detected_root_binaries") or ci_security_metrics.get(
+            "suspicious_reasons", []
+        )
 
         ev_safety = EvidenceItem(
             id=f"{audit_id}_ev_gate_safety",
@@ -281,7 +286,7 @@ class HardGatesService:
             source_endpoint=repo_url,
             collected_at=now,
             confidence=EvidenceConfidence.CONFIRMED,
-            summary=f"Read-only installation safety scan result: suspicious={suspicious}.",
+            summary=f"Root directory binary filename extension scan result: binaries_detected={suspicious}.",
             verified=True,
         )
         evidence.append(ev_safety)
@@ -290,10 +295,10 @@ class HardGatesService:
             results.append(
                 HardGateResult(
                     gate_id="untrusted_malicious_code",
-                    name="Installation & Binary Safety",
+                    name="Root Directory Binary Check",
                     status=HardGateStatus.FAIL,
                     severity="CRITICAL",
-                    reason=f"Suspicious files detected in repository root: {', '.join(reasons)}",
+                    reason=f"Precompiled binary file(s) detected in repository root: {', '.join(reasons)}",
                     evidence_ids=[ev_safety.id],
                 )
             )
@@ -303,8 +308,11 @@ class HardGatesService:
                     phase="phase_8_dependencies_and_security",
                     severity=FindingSeverity.CRITICAL,
                     category=FindingCategory.SECURITY,
-                    title="Suspicious Binaries in Root",
-                    description="Precompiled binaries found in repository root. Untrusted code execution policy forbids automated running.",
+                    title="Precompiled Binaries in Repository Root",
+                    description=(
+                        "Precompiled executable binary files (.exe, .dll, .so, .bin, .out) detected in repository root. "
+                        "Untrusted code execution policy forbids automated execution."
+                    ),
                     evidence_ids=[ev_safety.id],
                 )
             )
@@ -312,10 +320,13 @@ class HardGatesService:
             results.append(
                 HardGateResult(
                     gate_id="untrusted_malicious_code",
-                    name="Installation & Binary Safety",
+                    name="Root Directory Binary Check",
                     status=HardGateStatus.PASS,
                     severity="CRITICAL",
-                    reason="No suspicious precompiled binaries or high-risk root installation anomalies detected.",
+                    reason=(
+                        "No precompiled executable files (.exe, .dll, .so, .bin, .out) detected in repository root. "
+                        "Note: subdirectories and package build scripts are not scanned."
+                    ),
                     evidence_ids=[ev_safety.id],
                 )
             )

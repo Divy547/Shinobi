@@ -121,3 +121,99 @@ async def test_collect_repository_data_tracks_errors() -> None:
         assert "errors" in result
         assert "commits" in result["errors"]
         assert result["commits"] == []
+
+
+@pytest.mark.asyncio
+async def test_collect_repository_data_fetches_pr_comments_without_comments_field() -> None:
+    """Verify PR conversation comments are collected even when PR list item lacks a 'comments' field."""
+    pr_number = 42
+    comment_payload = [
+        {
+            "id": 1001,
+            "body": "Thank you for the pull request!",
+            "created_at": "2026-11-01T12:00:00Z",
+            "user": {"login": "maintainer", "type": "User"},
+        }
+    ]
+
+    def mock_handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/repos/owner/repo":
+            return httpx.Response(200, json={"name": "repo", "owner": {"login": "owner"}})
+        if path == "/repos/owner/repo/pulls":
+            # Real GitHub PR list items do not include a "comments" key
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "number": pr_number,
+                        "title": "Add feature",
+                        "state": "open",
+                        "user": {"login": "contributor"},
+                    }
+                ],
+            )
+        if path == f"/repos/owner/repo/pulls/{pr_number}/reviews":
+            return httpx.Response(200, json=[])
+        if path == f"/repos/owner/repo/issues/{pr_number}/comments":
+            return httpx.Response(200, json=comment_payload)
+        return httpx.Response(200, json=[])
+
+    transport = httpx.MockTransport(mock_handler)
+    gh = GitHubClient()
+    original_client = httpx.AsyncClient
+
+    def mock_async_client(**kwargs: object) -> httpx.AsyncClient:
+        kwargs["transport"] = transport
+        return original_client(**kwargs)  # type: ignore[arg-type]
+
+    import unittest.mock
+
+    with unittest.mock.patch("httpx.AsyncClient", side_effect=mock_async_client):
+        result = await gh.collect_repository_data("owner", "repo")
+        assert pr_number in result["sampled_pr_comments"]
+        comments = result["sampled_pr_comments"][pr_number]
+        assert len(comments) == 1
+        assert comments[0]["body"] == "Thank you for the pull request!"
+
+
+@pytest.mark.asyncio
+async def test_collect_repository_data_pr_comments_empty_and_api_failure() -> None:
+    """Verify PR comment fetching handles empty lists and API failures without crashing."""
+
+    def mock_handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/repos/owner/repo":
+            return httpx.Response(200, json={"name": "repo", "owner": {"login": "owner"}})
+        if path == "/repos/owner/repo/pulls":
+            return httpx.Response(
+                200,
+                json=[
+                    {"number": 10, "title": "PR with empty comments"},
+                    {"number": 20, "title": "PR with failing comments endpoint"},
+                ],
+            )
+        if path == "/repos/owner/repo/issues/10/comments":
+            return httpx.Response(200, json=[])  # Empty comment list
+        if path == "/repos/owner/repo/issues/20/comments":
+            return httpx.Response(500, text="Internal Server Error")
+        return httpx.Response(200, json=[])
+
+    transport = httpx.MockTransport(mock_handler)
+    gh = GitHubClient()
+    original_client = httpx.AsyncClient
+
+    def mock_async_client(**kwargs: object) -> httpx.AsyncClient:
+        kwargs["transport"] = transport
+        return original_client(**kwargs)  # type: ignore[arg-type]
+
+    import unittest.mock
+
+    with unittest.mock.patch("httpx.AsyncClient", side_effect=mock_async_client):
+        result = await gh.collect_repository_data("owner", "repo")
+        # PR 10 comments should be an empty list
+        assert 10 in result["sampled_pr_comments"]
+        assert result["sampled_pr_comments"][10] == []
+        # PR 20 comment call failed, should be omitted without crashing
+        assert 20 not in result["sampled_pr_comments"]
+        assert len(result["pull_requests"]) == 2
