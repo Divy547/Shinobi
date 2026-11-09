@@ -25,8 +25,11 @@ def test_parse_repository_target_invalid() -> None:
     with pytest.raises(ValueError, match="Unable to parse repository"):
         parse_repository_target("invalid-target-format")
 
-    with pytest.raises(ValueError, match="Unable to parse repository"):
+    with pytest.raises(ValueError, match="Invalid repository URL host"):
         parse_repository_target("https://notgithub.com")
+
+    with pytest.raises(ValueError, match="Unable to parse repository"):
+        parse_repository_target("https://github.com")
 
 
 @pytest.mark.asyncio

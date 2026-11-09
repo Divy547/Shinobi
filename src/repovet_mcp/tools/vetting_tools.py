@@ -9,6 +9,17 @@ try:
 except ImportError:
     from mcp.server.fastmcp import FastMCP as MCPServer  # type: ignore[no-redef]
 
+try:
+    from mcp.server.mcpserver.exceptions import ToolError
+except ImportError:
+    try:
+        from mcp.server.fastmcp.exceptions import ToolError  # type: ignore[no-redef]
+    except ImportError:
+
+        class ToolError(Exception):  # type: ignore[no-redef]
+            pass
+
+
 from repovet_mcp.config.settings import Settings, get_settings
 from repovet_mcp.models.audit import AuditReport, AuditTarget
 from repovet_mcp.models.evidence import EvidenceConfidence, EvidenceItem, EvidenceSourceType
@@ -23,6 +34,7 @@ from repovet_mcp.services.hard_gates_service import HardGatesService
 from repovet_mcp.services.newcomer_service import NewcomerService
 from repovet_mcp.services.responsiveness_service import ResponsivenessService
 from repovet_mcp.services.scoring_engine import ScoringEngine
+from repovet_mcp.services.security import redact_secrets, validate_audit_id
 from repovet_mcp.services.storage_service import StorageService
 
 logger = logging.getLogger("repovet_mcp.tools")
@@ -55,7 +67,9 @@ class VettingToolHandlers:
         """Fetch repository data, initialize audit record, and cache raw payloads."""
         owner, repo = parse_repository_target(target)
         assigned_id = (
-            audit_id if audit_id else f"audit_{owner}_{repo}_{int(datetime.now(UTC).timestamp())}"
+            validate_audit_id(audit_id)
+            if audit_id
+            else f"audit_{owner}_{repo}_{int(datetime.now(UTC).timestamp())}"
         )
 
         client = self._get_github_client()
@@ -80,7 +94,8 @@ class VettingToolHandlers:
 
     async def check_hard_gates(self, audit_id: str) -> dict[str, Any]:
         """Evaluate mandatory eligibility gates (license, activity, safety, build)."""
-        raw_data = self.storage.load_raw_data(audit_id)
+        valid_audit_id = validate_audit_id(audit_id)
+        raw_data = self.storage.load_raw_data(valid_audit_id)
         repo_meta = raw_data.get("repository", {})
         commits = raw_data.get("commits", [])
         releases = raw_data.get("releases", [])
@@ -98,11 +113,11 @@ class VettingToolHandlers:
         )
 
         gates, evidence, findings = self.hard_gates_service.evaluate_gates(
-            audit_id, activity_metrics, ci_security_metrics, repo_meta
+            valid_audit_id, activity_metrics, ci_security_metrics, repo_meta
         )
 
         return {
-            "audit_id": audit_id,
+            "audit_id": valid_audit_id,
             "hard_gates": [gate.model_dump() for gate in gates],
             "critical_blockers_count": sum(
                 1 for g in gates if g.status == "FAIL" and g.severity == "CRITICAL"
@@ -112,7 +127,8 @@ class VettingToolHandlers:
 
     async def calculate_responsiveness(self, audit_id: str) -> dict[str, Any]:
         """Calculate first human response times and triage rates distinguishing bots."""
-        raw_data = self.storage.load_raw_data(audit_id)
+        valid_audit_id = validate_audit_id(audit_id)
+        raw_data = self.storage.load_raw_data(valid_audit_id)
         issues = raw_data.get("issues", [])
         pulls = raw_data.get("pull_requests", [])
         issue_comments = raw_data.get("sampled_issue_comments", {})
@@ -128,13 +144,14 @@ class VettingToolHandlers:
         )
 
         return {
-            "audit_id": audit_id,
+            "audit_id": valid_audit_id,
             "responsiveness_metrics": metrics,
         }
 
     async def analyze_contribution_accessibility(self, audit_id: str) -> dict[str, Any]:
         """Evaluate documentation clarity, beginner issues, and newcomer accessibility."""
-        raw_data = self.storage.load_raw_data(audit_id)
+        valid_audit_id = validate_audit_id(audit_id)
+        raw_data = self.storage.load_raw_data(valid_audit_id)
         repo_meta = raw_data.get("repository", {})
         root_contents = raw_data.get("root_contents", [])
         community_profile = raw_data.get("community_profile", {})
@@ -147,14 +164,15 @@ class VettingToolHandlers:
         newcomer_metrics = self.newcomer_service.analyze_newcomers(issues, pulls)
 
         return {
-            "audit_id": audit_id,
+            "audit_id": valid_audit_id,
             "documentation": doc_metrics,
             "newcomer_accessibility": newcomer_metrics,
         }
 
     async def calculate_scorecard(self, audit_id: str) -> dict[str, Any]:
         """Calculate 10-criterion scorecard and final verdict, persisting the report."""
-        raw_data = self.storage.load_raw_data(audit_id)
+        valid_audit_id = validate_audit_id(audit_id)
+        raw_data = self.storage.load_raw_data(valid_audit_id)
         repo_meta = raw_data.get("repository", {})
         commits = raw_data.get("commits", [])
         contributors = raw_data.get("contributors", [])
@@ -190,7 +208,7 @@ class VettingToolHandlers:
 
         # Evaluate Hard Gates
         gates, gate_evidence, gate_findings = self.hard_gates_service.evaluate_gates(
-            audit_id, act_metrics, ci_sec_metrics, repo_meta
+            valid_audit_id, act_metrics, ci_sec_metrics, repo_meta
         )
 
         # Build grounded evidence items across all 10 scorecard criteria
@@ -382,7 +400,7 @@ class VettingToolHandlers:
         )
 
         report = AuditReport(
-            audit_id=audit_id,
+            audit_id=valid_audit_id,
             target=target_model,
             decision=decision,
             scorecard=scorecard,
@@ -397,10 +415,11 @@ class VettingToolHandlers:
         )
 
         self.storage.save_audit_report(report)
-        self.storage.save_evidence(audit_id, evidence_list)
+        self.storage.save_evidence(valid_audit_id, evidence_list)
+        self.storage.create_audit_manifest(valid_audit_id, overwrite=True)
 
         return {
-            "audit_id": audit_id,
+            "audit_id": valid_audit_id,
             "target": target_model.model_dump(),
             "decision": decision.value,
             "total_score": scorecard.total_score,
@@ -413,36 +432,38 @@ class VettingToolHandlers:
 
     async def validate_evidence(self, audit_id: str) -> dict[str, Any]:
         """Validate evidence grounding, citations, and confidence classifications."""
-        report = self.storage.load_audit_report(audit_id)
+        valid_audit_id = validate_audit_id(audit_id)
+        report = self.storage.load_audit_report(valid_audit_id)
         if not report:
             # If scorecard not yet calculated, calculate it now
-            await self.calculate_scorecard(audit_id)
-            report = self.storage.load_audit_report(audit_id)
+            await self.calculate_scorecard(valid_audit_id)
+            report = self.storage.load_audit_report(valid_audit_id)
 
         if not report:
-            msg = f"Unable to load or compute audit report for {audit_id}"
+            msg = f"Unable to load or compute audit report for {valid_audit_id}"
             raise ValueError(msg)
 
         validation = self.evidence_validator.validate_audit_evidence(report)
         return {
-            "audit_id": audit_id,
+            "audit_id": valid_audit_id,
             "validation_results": validation,
         }
 
     async def generate_pdf_report(self, audit_id: str) -> dict[str, Any]:
         """Generate executive multi-section PDF audit report in reports/generated/."""
-        report = self.storage.load_audit_report(audit_id)
+        valid_audit_id = validate_audit_id(audit_id)
+        report = self.storage.load_audit_report(valid_audit_id)
         if not report:
-            await self.calculate_scorecard(audit_id)
-            report = self.storage.load_audit_report(audit_id)
+            await self.calculate_scorecard(valid_audit_id)
+            report = self.storage.load_audit_report(valid_audit_id)
 
         if not report:
-            msg = f"Unable to locate audit report for {audit_id}"
+            msg = f"Unable to locate audit report for {valid_audit_id}"
             raise ValueError(msg)
 
         pdf_path = self.pdf_generator.generate_report(report)
         return {
-            "audit_id": audit_id,
+            "audit_id": valid_audit_id,
             "report_path": str(pdf_path),
             "file_name": pdf_path.name,
             "file_size_bytes": pdf_path.stat().st_size,
@@ -457,53 +478,70 @@ def register_vetting_tools(
     """Register all seven RepoVet MCP tools onto the server instance."""
     handlers = VettingToolHandlers(settings)
 
+    async def _safe_execute(tool_name: str, coro: Any) -> Any:
+        try:
+            return await coro
+        except ToolError:
+            raise
+        except Exception as exc:
+            msg = redact_secrets(str(exc))
+            logger.error("Tool '%s' execution failed: %s", tool_name, msg)
+            raise ToolError(msg) from None
+
     @server.tool(
         name="analyze_repository",
         description="Initialize an audit and collect repository metadata, commits, PRs, issues, and workflows from GitHub.",
     )
     async def analyze_repository(target: str, audit_id: str | None = None) -> dict[str, Any]:
-        return await handlers.analyze_repository(target, audit_id)
+        return await _safe_execute(
+            "analyze_repository", handlers.analyze_repository(target, audit_id)
+        )
 
     @server.tool(
         name="check_hard_gates",
         description="Evaluate mandatory repository eligibility conditions (license validity, dormancy, default branch CI, installation safety).",
     )
     async def check_hard_gates(audit_id: str) -> dict[str, Any]:
-        return await handlers.check_hard_gates(audit_id)
+        return await _safe_execute("check_hard_gates", handlers.check_hard_gates(audit_id))
 
     @server.tool(
         name="calculate_responsiveness",
         description="Calculate first human response times and triage velocity for PRs and issues, filtering out automated bot comments.",
     )
     async def calculate_responsiveness(audit_id: str) -> dict[str, Any]:
-        return await handlers.calculate_responsiveness(audit_id)
+        return await _safe_execute(
+            "calculate_responsiveness", handlers.calculate_responsiveness(audit_id)
+        )
 
     @server.tool(
         name="analyze_contribution_accessibility",
         description="Evaluate contribution documentation (README, CONTRIBUTING, Code of Conduct) and newcomer/beginner issues.",
     )
     async def analyze_contribution_accessibility(audit_id: str) -> dict[str, Any]:
-        return await handlers.analyze_contribution_accessibility(audit_id)
+        return await _safe_execute(
+            "analyze_contribution_accessibility",
+            handlers.analyze_contribution_accessibility(audit_id),
+        )
 
     @server.tool(
         name="calculate_scorecard",
         description="Score repository across the 10 standardized criteria (0-2 scale, 20 max points) and determine the final verdict.",
     )
     async def calculate_scorecard(audit_id: str) -> dict[str, Any]:
-        return await handlers.calculate_scorecard(audit_id)
+        return await _safe_execute("calculate_scorecard", handlers.calculate_scorecard(audit_id))
 
     @server.tool(
         name="validate_evidence",
         description="Validate evidence structure, citations, and confidence ratings, verifying all claims are grounded in primary data.",
     )
     async def validate_evidence(audit_id: str) -> dict[str, Any]:
-        return await handlers.validate_evidence(audit_id)
+        return await _safe_execute("validate_evidence", handlers.validate_evidence(audit_id))
 
     @server.tool(
         name="generate_pdf_report",
         description="Generate a professional multi-section PDF audit report in reports/generated/ including verdict, scorecard, and evidence appendix.",
     )
     async def generate_pdf_report(audit_id: str) -> dict[str, Any]:
-        return await handlers.generate_pdf_report(audit_id)
+        return await _safe_execute("generate_pdf_report", handlers.generate_pdf_report(audit_id))
 
     return handlers

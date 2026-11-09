@@ -17,6 +17,7 @@ logger = logging.getLogger("repovet_mcp")
 def create_server(settings: Settings | None = None) -> MCPServer:
     """Create and configure the MCP server instance and register all tools."""
     resolved_settings = settings or get_settings()
+    resolved_settings.validate_startup_config()
     server = MCPServer(
         name=resolved_settings.server_name,
         version=resolved_settings.server_version,
@@ -36,6 +37,7 @@ def main() -> None:
     logging.basicConfig(
         level=settings.log_level.upper(),
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        stream=sys.stderr,
     )
     logger.info("Initializing %s v%s", settings.server_name, settings.server_version)
 

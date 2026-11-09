@@ -115,6 +115,29 @@ class Settings(BaseSettings):
                 raise ValueError(msg)
             return data
 
+    def validate_startup_config(self) -> None:
+        """Validate required configuration files, directories, and parameters at server startup."""
+        valid_log_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+        if self.log_level.upper() not in valid_log_levels:
+            msg = (
+                f"Invalid log level '{self.log_level}'. Must be one of: {sorted(valid_log_levels)}"
+            )
+            raise ValueError(msg)
+
+        # Validate configuration YAMLs
+        self.load_scoring_config()
+        self.load_thresholds_config()
+
+        # Validate storage directories
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.reports_dir.mkdir(parents=True, exist_ok=True)
+        (self.reports_dir / "generated").mkdir(parents=True, exist_ok=True)
+
+        # Validate GitHub API base URL
+        if not self.github_api_url.startswith(("http://", "https://")):
+            msg = f"Invalid GitHub API URL: '{self.github_api_url}' must start with http:// or https://"
+            raise ValueError(msg)
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

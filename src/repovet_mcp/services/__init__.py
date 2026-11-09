@@ -16,7 +16,15 @@ from repovet_mcp.services.hard_gates_service import HardGatesService
 from repovet_mcp.services.newcomer_service import NewcomerService
 from repovet_mcp.services.responsiveness_service import ResponsivenessService
 from repovet_mcp.services.scoring_engine import ScoringEngine
-from repovet_mcp.services.storage_service import StorageService
+from repovet_mcp.services.security import (
+    redact_secrets,
+    sanitize_for_report,
+    validate_audit_id,
+    validate_repo_component,
+    validate_repository_url_domain,
+    validate_safe_subpath,
+)
+from repovet_mcp.services.storage_service import StorageCorruptionError, StorageService
 
 __all__ = [
     "ActivityService",
@@ -32,6 +40,13 @@ __all__ = [
     "RepositoryNotFoundError",
     "ResponsivenessService",
     "ScoringEngine",
+    "StorageCorruptionError",
     "StorageService",
     "parse_repository_target",
+    "redact_secrets",
+    "sanitize_for_report",
+    "validate_audit_id",
+    "validate_repo_component",
+    "validate_repository_url_domain",
+    "validate_safe_subpath",
 ]

@@ -1,5 +1,7 @@
 """Unit tests for evidence grounding and confidence validation."""
 
+from pathlib import Path
+
 from repovet_mcp.models.audit import (
     AuditDecision,
     AuditReport,
@@ -104,7 +106,7 @@ def test_evidence_validator_unsupported_finding() -> None:
     assert "find_unsupported" in results["unsupported_findings"]
 
 
-def test_evidence_validator_full_scorecard_grounding() -> None:
+def test_evidence_validator_full_scorecard_grounding(tmp_path: Path) -> None:
     """Verify that a 10-criterion scorecard with dedicated evidence items validates cleanly."""
     from repovet_mcp.config.settings import Settings
     from repovet_mcp.services.activity_service import ActivityService
@@ -118,8 +120,14 @@ def test_evidence_validator_full_scorecard_grounding() -> None:
     from repovet_mcp.tools.vetting_tools import VettingToolHandlers
     from tests.fixtures.mock_data import create_mock_repository_data
 
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        reports_dir=tmp_path / "reports",
+        logs_dir=tmp_path / "logs",
+        config_dir=Path(__file__).parent.parent.parent / "config",
+    )
     data = create_mock_repository_data()
-    handlers = VettingToolHandlers(Settings())
+    handlers = VettingToolHandlers(settings)
     audit_id = "test_audit_grounding"
     handlers.storage.save_raw_data(audit_id, data)
 

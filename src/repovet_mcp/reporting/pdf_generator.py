@@ -20,6 +20,41 @@ from reportlab.platypus import (
 
 from repovet_mcp.config.settings import Settings, get_settings
 from repovet_mcp.models.audit import AuditDecision, AuditReport, HardGateStatus
+from repovet_mcp.services.security import sanitize_for_report
+
+SYSTEM_DEJAVU_PATHS = [
+    Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+    Path("/usr/share/fonts/dejavu/DejaVuSans.ttf"),
+    Path("/Library/Fonts/DejaVuSans.ttf"),
+]
+SYSTEM_DEJAVU_BOLD_PATHS = [
+    Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+    Path("/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf"),
+    Path("/Library/Fonts/DejaVuSans-Bold.ttf"),
+]
+
+
+def _init_pdf_fonts() -> tuple[str, str]:
+    """Register DejaVuSans TrueType fonts if available on the host system, else fallback to Helvetica."""
+    regular_font = "Helvetica"
+    bold_font = "Helvetica-Bold"
+    try:
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+
+        reg_path = next((p for p in SYSTEM_DEJAVU_PATHS if p.exists()), None)
+        bold_path = next((p for p in SYSTEM_DEJAVU_BOLD_PATHS if p.exists()), None)
+        if reg_path and bold_path:
+            pdfmetrics.registerFont(TTFont("DejaVuSans", str(reg_path)))
+            pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", str(bold_path)))
+            regular_font = "DejaVuSans"
+            bold_font = "DejaVuSans-Bold"
+    except Exception:
+        pass
+    return regular_font, bold_font
+
+
+PDF_REGULAR_FONT, PDF_BOLD_FONT = _init_pdf_fonts()
 
 
 class NumberedCanvas(canvas.Canvas):
@@ -43,7 +78,7 @@ class NumberedCanvas(canvas.Canvas):
 
     def draw_page_decorations(self, page_count: int) -> None:
         self.saveState()
-        self.setFont("Helvetica", 8)
+        self.setFont(PDF_REGULAR_FONT, 8)
         self.setFillColor(colors.HexColor("#64748b"))
 
         # Running Header (pages > 1)
@@ -81,7 +116,7 @@ class PDFReportGenerator:
         custom["DocTitle"] = ParagraphStyle(
             "DocTitle",
             parent=base_styles["Heading1"],
-            fontName="Helvetica-Bold",
+            fontName=PDF_BOLD_FONT,
             fontSize=22,
             leading=26,
             textColor=colors.HexColor("#0f172a"),
@@ -90,7 +125,7 @@ class PDFReportGenerator:
         custom["DocSubtitle"] = ParagraphStyle(
             "DocSubtitle",
             parent=base_styles["Normal"],
-            fontName="Helvetica-Bold",
+            fontName=PDF_BOLD_FONT,
             fontSize=11,
             leading=14,
             textColor=colors.HexColor("#2563eb"),
@@ -99,7 +134,7 @@ class PDFReportGenerator:
         custom["SectionHeading"] = ParagraphStyle(
             "SectionHeading",
             parent=base_styles["Heading2"],
-            fontName="Helvetica-Bold",
+            fontName=PDF_BOLD_FONT,
             fontSize=13,
             leading=16,
             textColor=colors.HexColor("#1e293b"),
@@ -110,7 +145,7 @@ class PDFReportGenerator:
         custom["Body"] = ParagraphStyle(
             "Body",
             parent=base_styles["Normal"],
-            fontName="Helvetica",
+            fontName=PDF_REGULAR_FONT,
             fontSize=9,
             leading=13,
             textColor=colors.HexColor("#334155"),
@@ -119,12 +154,12 @@ class PDFReportGenerator:
         custom["BodyBold"] = ParagraphStyle(
             "BodyBold",
             parent=custom["Body"],
-            fontName="Helvetica-Bold",
+            fontName=PDF_BOLD_FONT,
         )
         custom["TableCell"] = ParagraphStyle(
             "TableCell",
             parent=base_styles["Normal"],
-            fontName="Helvetica",
+            fontName=PDF_REGULAR_FONT,
             fontSize=8,
             leading=11,
             textColor=colors.HexColor("#1e293b"),
@@ -132,11 +167,11 @@ class PDFReportGenerator:
         custom["TableCellBold"] = ParagraphStyle(
             "TableCellBold",
             parent=custom["TableCell"],
-            fontName="Helvetica-Bold",
+            fontName=PDF_BOLD_FONT,
         )
         custom["DecisionBadge"] = ParagraphStyle(
             "DecisionBadge",
-            fontName="Helvetica-Bold",
+            fontName=PDF_BOLD_FONT,
             fontSize=24,
             leading=28,
             alignment=1,  # Center
@@ -144,7 +179,7 @@ class PDFReportGenerator:
         )
         custom["DecisionSub"] = ParagraphStyle(
             "DecisionSub",
-            fontName="Helvetica-Bold",
+            fontName=PDF_BOLD_FONT,
             fontSize=11,
             leading=14,
             alignment=1,  # Center
@@ -186,30 +221,49 @@ class PDFReportGenerator:
 
         # Target Repository Metadata Card
         target = report.target
+        target_owner_repo = sanitize_for_report(f"{target.owner}/{target.repo}")
+        target_audit_id = sanitize_for_report(report.audit_id)
+        target_url = sanitize_for_report(target.url)
+        date_str = sanitize_for_report(report.created_at.strftime("%Y-%m-%d %H:%M:%S UTC"))
+        if target.stars is not None and target.forks is not None:
+            stars_forks = f"{target.stars:,} stars • {target.forks:,} forks"
+        elif target.stars is not None:
+            stars_forks = f"{target.stars:,} stars"
+        else:
+            stars_forks = "N/A"
+        stars_forks_str = sanitize_for_report(stars_forks)
+        license_str = sanitize_for_report(target.license_spdx or "Unlicensed / Unknown")
+        branch_str = sanitize_for_report(target.default_branch or "main")
+        open_issues_str = (
+            sanitize_for_report(str(target.open_issues))
+            if target.open_issues is not None
+            else "N/A"
+        )
+
         target_info = [
             [
                 Paragraph("<b>Repository:</b>", styles["TableCellBold"]),
-                Paragraph(f"{target.owner}/{target.repo}", styles["TableCell"]),
+                Paragraph(target_owner_repo, styles["TableCell"]),
                 Paragraph("<b>Audit ID:</b>", styles["TableCellBold"]),
-                Paragraph(report.audit_id, styles["TableCell"]),
+                Paragraph(target_audit_id, styles["TableCell"]),
             ],
             [
                 Paragraph("<b>GitHub URL:</b>", styles["TableCellBold"]),
-                Paragraph(f"<a href='{target.url}'>{target.url}</a>", styles["TableCell"]),
+                Paragraph(f"<a href='{target_url}'>{target_url}</a>", styles["TableCell"]),
                 Paragraph("<b>Date (UTC):</b>", styles["TableCellBold"]),
-                Paragraph(report.created_at.strftime("%Y-%m-%d %H:%M:%S UTC"), styles["TableCell"]),
+                Paragraph(date_str, styles["TableCell"]),
             ],
             [
                 Paragraph("<b>Stars / Forks:</b>", styles["TableCellBold"]),
-                Paragraph(f"{target.stars:,} stars • {target.forks:,} forks", styles["TableCell"]),
+                Paragraph(stars_forks_str, styles["TableCell"]),
                 Paragraph("<b>License:</b>", styles["TableCellBold"]),
-                Paragraph(target.license_spdx or "Unlicensed / Unknown", styles["TableCell"]),
+                Paragraph(license_str, styles["TableCell"]),
             ],
             [
                 Paragraph("<b>Default Branch:</b>", styles["TableCellBold"]),
-                Paragraph(target.default_branch, styles["TableCell"]),
+                Paragraph(branch_str, styles["TableCell"]),
                 Paragraph("<b>Open Issues:</b>", styles["TableCellBold"]),
-                Paragraph(str(target.open_issues), styles["TableCell"]),
+                Paragraph(open_issues_str, styles["TableCell"]),
             ],
         ]
         meta_table = Table(target_info, colWidths=[90, 180, 80, 190])
@@ -258,10 +312,15 @@ class PDFReportGenerator:
         )
 
         badge_content = [
-            [Paragraph(f"FINAL AUDIT VERDICT: {verdict_title}", styles["DecisionBadge"])],
             [
                 Paragraph(
-                    f"Score: {report.scorecard.total_score} / 20 ({report.scorecard.percentage}%) • {verdict_desc}",
+                    f"FINAL AUDIT VERDICT: {sanitize_for_report(verdict_title)}",
+                    styles["DecisionBadge"],
+                )
+            ],
+            [
+                Paragraph(
+                    f"Score: {report.scorecard.total_score} / 20 ({report.scorecard.percentage}%) • {sanitize_for_report(verdict_desc)}",
                     styles["DecisionSub"],
                 )
             ],
@@ -287,47 +346,55 @@ class PDFReportGenerator:
         # 3. Mandatory Hard Gates Summary
         # =====================================================================
         story.append(Paragraph("1. Mandatory Eligibility Hard Gates", styles["SectionHeading"]))
-        gate_rows = [
-            [
-                Paragraph("<b>Hard Gate</b>", styles["TableCellBold"]),
-                Paragraph("<b>Status</b>", styles["TableCellBold"]),
-                Paragraph("<b>Severity</b>", styles["TableCellBold"]),
-                Paragraph("<b>Evaluation Rationale</b>", styles["TableCellBold"]),
+        if not report.hard_gates:
+            story.append(
+                Paragraph(
+                    "No mandatory hard gates were evaluated for this audit record.",
+                    styles["Body"],
+                )
+            )
+        else:
+            gate_rows = [
+                [
+                    Paragraph("<b>Hard Gate</b>", styles["TableCellBold"]),
+                    Paragraph("<b>Status</b>", styles["TableCellBold"]),
+                    Paragraph("<b>Severity</b>", styles["TableCellBold"]),
+                    Paragraph("<b>Evaluation Rationale</b>", styles["TableCellBold"]),
+                ]
             ]
-        ]
-        status_colors = {
-            HardGateStatus.PASS: "#15803d",
-            HardGateStatus.FAIL: "#b91c1c",
-            HardGateStatus.UNKNOWN: "#c2410c",
-        }
-        for gate in report.hard_gates:
-            s_color = status_colors.get(gate.status, "#475569")
-            status_p = Paragraph(
-                f"<font color='{s_color}'><b>{gate.status.value}</b></font>",
-                styles["TableCellBold"],
-            )
-            gate_rows.append(
-                [
-                    Paragraph(gate.name, styles["TableCellBold"]),
-                    status_p,
-                    Paragraph(gate.severity, styles["TableCell"]),
-                    Paragraph(gate.reason, styles["TableCell"]),
-                ]
-            )
+            status_colors = {
+                HardGateStatus.PASS: "#15803d",
+                HardGateStatus.FAIL: "#b91c1c",
+                HardGateStatus.UNKNOWN: "#c2410c",
+            }
+            for gate in report.hard_gates:
+                s_color = status_colors.get(gate.status, "#475569")
+                status_p = Paragraph(
+                    f"<font color='{s_color}'><b>{sanitize_for_report(gate.status.value)}</b></font>",
+                    styles["TableCellBold"],
+                )
+                gate_rows.append(
+                    [
+                        Paragraph(sanitize_for_report(gate.name), styles["TableCellBold"]),
+                        status_p,
+                        Paragraph(sanitize_for_report(gate.severity), styles["TableCell"]),
+                        Paragraph(sanitize_for_report(gate.reason), styles["TableCell"]),
+                    ]
+                )
 
-        gates_table = Table(gate_rows, colWidths=[140, 60, 60, 280])
-        gates_table.setStyle(
-            TableStyle(
-                [
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
-                    ("BOX", (0, 0), (-1, -1), 1, colors.HexColor("#cbd5e1")),
-                    ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#e2e8f0")),
-                    ("TOPPADDING", (0, 0), (-1, -1), 4),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-                ]
+            gates_table = Table(gate_rows, colWidths=[140, 60, 60, 280], repeatRows=1)
+            gates_table.setStyle(
+                TableStyle(
+                    [
+                        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
+                        ("BOX", (0, 0), (-1, -1), 1, colors.HexColor("#cbd5e1")),
+                        ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#e2e8f0")),
+                        ("TOPPADDING", (0, 0), (-1, -1), 4),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                    ]
+                )
             )
-        )
-        story.append(gates_table)
+            story.append(gates_table)
         story.append(Spacer(1, 12))
 
         # =====================================================================
@@ -396,7 +463,7 @@ class PDFReportGenerator:
                 Paragraph("EVALUATED", styles["TableCellBold"]),
             ],
         ]
-        phase_table = Table(phase_data, colWidths=[24, 180, 240, 96])
+        phase_table = Table(phase_data, colWidths=[24, 180, 240, 96], repeatRows=1)
         phase_table.setStyle(
             TableStyle(
                 [
@@ -443,10 +510,13 @@ class PDFReportGenerator:
             score_rows.append(
                 [
                     Paragraph(str(idx), styles["TableCell"]),
-                    Paragraph(crit.name, styles["TableCellBold"]),
-                    Paragraph(crit.phase.replace("_", " ").title(), styles["TableCell"]),
+                    Paragraph(sanitize_for_report(crit.name), styles["TableCellBold"]),
+                    Paragraph(
+                        sanitize_for_report(crit.phase.replace("_", " ").title()),
+                        styles["TableCell"],
+                    ),
                     score_p,
-                    Paragraph(crit.rationale, styles["TableCell"]),
+                    Paragraph(sanitize_for_report(crit.rationale), styles["TableCell"]),
                 ]
             )
 
@@ -458,13 +528,13 @@ class PDFReportGenerator:
                 Paragraph("<b>10 Criteria</b>", styles["TableCellBold"]),
                 Paragraph(f"<b>{report.scorecard.total_score} / 20</b>", styles["TableCellBold"]),
                 Paragraph(
-                    f"<b>{report.scorecard.percentage}% Attainment ({report.decision.value})</b>",
+                    f"<b>{report.scorecard.percentage}% Attainment ({sanitize_for_report(report.decision.value)})</b>",
                     styles["TableCellBold"],
                 ),
             ]
         )
 
-        score_table = Table(score_rows, colWidths=[20, 140, 100, 48, 232])
+        score_table = Table(score_rows, colWidths=[20, 140, 100, 48, 232], repeatRows=1)
         score_table.setStyle(
             TableStyle(
                 [
@@ -493,10 +563,30 @@ class PDFReportGenerator:
         days_commit = act.get("days_since_latest_commit")
         days_str = f"{days_commit} days" if days_commit is not None else "N/A (Unavailable)"
 
+        commits_90d = act.get("commits_last_90d")
+        commits_str = f"{commits_90d} commits" if commits_90d is not None else "N/A (Unavailable)"
+
         median_pr_resp = resp.get("median_pr_first_response_hours")
         pr_resp_str = (
             f"{median_pr_resp} hours" if median_pr_resp is not None else "N/A (No response samples)"
         )
+
+        pr_merge_rate = resp.get("pr_merge_rate")
+        pr_merge_str = f"{pr_merge_rate}%" if pr_merge_rate is not None else "N/A (Unavailable)"
+
+        unanswered = resp.get("unanswered_issue_percentage")
+        unanswered_str = f"{unanswered}%" if unanswered is not None else "N/A (Unavailable)"
+
+        newcomer_rate = acc.get("newcomer_merge_rate")
+        newcomer_merged = acc.get("newcomer_prs_merged", 0)
+        newcomer_str = (
+            f"{newcomer_rate}% ({newcomer_merged} merged)"
+            if newcomer_rate is not None
+            else "N/A (Unavailable)"
+        )
+
+        open_beg = acc.get("open_beginner_issues_count")
+        open_beg_str = f"{open_beg} issues" if open_beg is not None else "N/A (Unavailable)"
 
         stats_data = [
             [
@@ -506,50 +596,45 @@ class PDFReportGenerator:
             ],
             [
                 Paragraph("Days Since Last Commit", styles["TableCellBold"]),
-                Paragraph(days_str, styles["TableCell"]),
+                Paragraph(sanitize_for_report(days_str), styles["TableCell"]),
                 Paragraph(
                     "&le; 30 days is excellent; &gt; 365 days is dormant", styles["TableCell"]
                 ),
             ],
             [
                 Paragraph("Commit Volume (90 Days)", styles["TableCellBold"]),
-                Paragraph(f"{act.get('commits_last_90d', 0)} commits", styles["TableCell"]),
+                Paragraph(sanitize_for_report(commits_str), styles["TableCell"]),
                 Paragraph("Evaluated across default branch sample", styles["TableCell"]),
             ],
             [
                 Paragraph("PR Median Human Response", styles["TableCellBold"]),
-                Paragraph(pr_resp_str, styles["TableCell"]),
+                Paragraph(sanitize_for_report(pr_resp_str), styles["TableCell"]),
                 Paragraph("&lt; 72 hours recommended for active OSS/GSoC", styles["TableCell"]),
             ],
             [
                 Paragraph("PR Overall Merge Rate", styles["TableCellBold"]),
-                Paragraph(f"{resp.get('pr_merge_rate', 0.0)}%", styles["TableCell"]),
+                Paragraph(sanitize_for_report(pr_merge_str), styles["TableCell"]),
                 Paragraph("Calculated across closed pull requests", styles["TableCell"]),
             ],
             [
                 Paragraph("Unanswered Issue Percentage", styles["TableCellBold"]),
-                Paragraph(f"{resp.get('unanswered_issue_percentage', 0.0)}%", styles["TableCell"]),
+                Paragraph(sanitize_for_report(unanswered_str), styles["TableCell"]),
                 Paragraph("&lt; 25% indicates prompt issue triage", styles["TableCell"]),
             ],
             [
                 Paragraph("Newcomer PR Merge Rate", styles["TableCellBold"]),
-                Paragraph(
-                    f"{acc.get('newcomer_merge_rate', 0.0)}% ({acc.get('newcomer_prs_merged', 0)} merged)",
-                    styles["TableCell"],
-                ),
+                Paragraph(sanitize_for_report(newcomer_str), styles["TableCell"]),
                 Paragraph(
                     "Reflects willingness to mentor outside contributors", styles["TableCell"]
                 ),
             ],
             [
                 Paragraph("Open Beginner Issues", styles["TableCellBold"]),
-                Paragraph(
-                    f"{acc.get('open_beginner_issues_count', 0)} issues", styles["TableCell"]
-                ),
+                Paragraph(sanitize_for_report(open_beg_str), styles["TableCell"]),
                 Paragraph("Tagged 'good first issue' / 'help wanted'", styles["TableCell"]),
             ],
         ]
-        stats_table = Table(stats_data, colWidths=[180, 140, 220])
+        stats_table = Table(stats_data, colWidths=[180, 140, 220], repeatRows=1)
         stats_table.setStyle(
             TableStyle(
                 [
@@ -567,10 +652,15 @@ class PDFReportGenerator:
         # =====================================================================
         # 7. Critical Findings & Technical Risks
         # =====================================================================
-        if report.findings:
+        story.append(Paragraph("5. Critical Findings & Technical Risks", styles["SectionHeading"]))
+        if not report.findings:
             story.append(
-                Paragraph("5. Critical Findings & Technical Risks", styles["SectionHeading"])
+                Paragraph(
+                    "No critical technical risks or blocking findings were detected during this audit.",
+                    styles["Body"],
+                )
             )
+        else:
             finding_rows = [
                 [
                     Paragraph("<b>Severity</b>", styles["TableCellBold"]),
@@ -579,7 +669,7 @@ class PDFReportGenerator:
                     Paragraph("<b>Remediation Guidance</b>", styles["TableCellBold"]),
                 ]
             ]
-            for find in report.findings[:8]:
+            for find in report.findings:
                 sev_color = (
                     "#b91c1c"
                     if find.severity == "CRITICAL"
@@ -588,21 +678,27 @@ class PDFReportGenerator:
                 finding_rows.append(
                     [
                         Paragraph(
-                            f"<font color='{sev_color}'><b>{find.severity.value}</b></font>",
+                            f"<font color='{sev_color}'><b>{sanitize_for_report(find.severity.value)}</b></font>",
                             styles["TableCellBold"],
                         ),
-                        Paragraph(find.category.value.title(), styles["TableCellBold"]),
                         Paragraph(
-                            f"<b>{find.title}</b><br/>{find.description}", styles["TableCell"]
+                            sanitize_for_report(find.category.value.title()),
+                            styles["TableCellBold"],
                         ),
                         Paragraph(
-                            find.remediation_recommendation or "Review repository status.",
+                            f"<b>{sanitize_for_report(find.title)}</b><br/>{sanitize_for_report(find.description)}",
+                            styles["TableCell"],
+                        ),
+                        Paragraph(
+                            sanitize_for_report(
+                                find.remediation_recommendation or "Review repository status."
+                            ),
                             styles["TableCell"],
                         ),
                     ]
                 )
 
-            findings_table = Table(finding_rows, colWidths=[65, 85, 230, 160])
+            findings_table = Table(finding_rows, colWidths=[65, 85, 230, 160], repeatRows=1)
             findings_table.setStyle(
                 TableStyle(
                     [
@@ -615,27 +711,34 @@ class PDFReportGenerator:
                 )
             )
             story.append(findings_table)
-            story.append(Spacer(1, 14))
+        story.append(Spacer(1, 14))
 
         # =====================================================================
         # 8. Suggested Contribution Opportunities
         # =====================================================================
+        story.append(
+            KeepTogether(
+                [
+                    Paragraph(
+                        "6. Suggested Contribution Opportunities (Beginner Issues)",
+                        styles["SectionHeading"],
+                    ),
+                    Paragraph(
+                        "The following issues have been actively triaged as welcoming entry points for newcomers:",
+                        styles["Body"],
+                    ),
+                ]
+            )
+        )
         beginner_issues = acc.get("open_beginner_issues", [])
-        if beginner_issues:
+        if not beginner_issues:
             story.append(
-                KeepTogether(
-                    [
-                        Paragraph(
-                            "6. Suggested Contribution Opportunities (Beginner Issues)",
-                            styles["SectionHeading"],
-                        ),
-                        Paragraph(
-                            "The following issues have been actively triaged as welcoming entry points for newcomers:",
-                            styles["Body"],
-                        ),
-                    ]
+                Paragraph(
+                    "No beginner-friendly or newcomer issues were identified in this repository backlog.",
+                    styles["Body"],
                 )
             )
+        else:
             opp_rows = [
                 [
                     Paragraph("<b>Issue #</b>", styles["TableCellBold"]),
@@ -643,18 +746,24 @@ class PDFReportGenerator:
                     Paragraph("<b>Labels</b>", styles["TableCellBold"]),
                 ]
             ]
-            for opp in beginner_issues[:5]:
+            for opp in beginner_issues:
+                issue_num = sanitize_for_report(str(opp.get("number", "")))
+                issue_title = sanitize_for_report(opp.get("title", ""))
+                issue_url = sanitize_for_report(opp.get("url", ""))
+                issue_labels = sanitize_for_report(", ".join(opp.get("labels", [])))
+                title_cell = (
+                    f"<a href='{issue_url}'>{issue_title}</a>"
+                    if issue_url and issue_url != "N/A"
+                    else issue_title
+                )
                 opp_rows.append(
                     [
-                        Paragraph(f"#{opp.get('number')}", styles["TableCellBold"]),
-                        Paragraph(
-                            f"<a href='{opp.get('url')}'>{opp.get('title')}</a>",
-                            styles["TableCell"],
-                        ),
-                        Paragraph(", ".join(opp.get("labels", [])), styles["TableCell"]),
+                        Paragraph(f"#{issue_num}", styles["TableCellBold"]),
+                        Paragraph(title_cell, styles["TableCell"]),
+                        Paragraph(issue_labels, styles["TableCell"]),
                     ]
                 )
-            opp_table = Table(opp_rows, colWidths=[60, 320, 160])
+            opp_table = Table(opp_rows, colWidths=[60, 320, 160], repeatRows=1)
             opp_table.setStyle(
                 TableStyle(
                     [
@@ -667,7 +776,7 @@ class PDFReportGenerator:
                 )
             )
             story.append(opp_table)
-            story.append(Spacer(1, 14))
+        story.append(Spacer(1, 14))
 
         # =====================================================================
         # 9. Grounded Evidence Appendix & Provenance
@@ -685,48 +794,62 @@ class PDFReportGenerator:
                 ]
             )
         )
-        ev_rows = [
-            [
-                Paragraph("<b>Evidence ID</b>", styles["TableCellBold"]),
-                Paragraph("<b>Phase</b>", styles["TableCellBold"]),
-                Paragraph("<b>Confidence</b>", styles["TableCellBold"]),
-                Paragraph("<b>Source Endpoint</b>", styles["TableCellBold"]),
-                Paragraph("<b>Grounded Observation Summary</b>", styles["TableCellBold"]),
+        if not report.evidence:
+            story.append(
+                Paragraph(
+                    "No grounded evidence records are attached to this audit.",
+                    styles["Body"],
+                )
+            )
+        else:
+            ev_rows = [
+                [
+                    Paragraph("<b>Evidence ID</b>", styles["TableCellBold"]),
+                    Paragraph("<b>Phase</b>", styles["TableCellBold"]),
+                    Paragraph("<b>Confidence</b>", styles["TableCellBold"]),
+                    Paragraph("<b>Source Endpoint</b>", styles["TableCellBold"]),
+                    Paragraph("<b>Grounded Observation Summary</b>", styles["TableCellBold"]),
+                ]
             ]
-        ]
-        conf_colors = {
-            "CONFIRMED": "#15803d",
-            "INFERRED": "#2563eb",
-            "UNKNOWN": "#b45309",
-        }
-        for ev in report.evidence[:16]:
-            c_color = conf_colors.get(ev.confidence.value, "#475569")
-            ev_rows.append(
-                [
-                    Paragraph(ev.id, styles["TableCell"]),
-                    Paragraph(ev.phase.replace("_", " ").title(), styles["TableCell"]),
-                    Paragraph(
-                        f"<font color='{c_color}'><b>{ev.confidence.value}</b></font>",
-                        styles["TableCellBold"],
-                    ),
-                    Paragraph(ev.source_endpoint or "API Endpoint", styles["TableCell"]),
-                    Paragraph(ev.summary, styles["TableCell"]),
-                ]
-            )
+            conf_colors = {
+                "CONFIRMED": "#15803d",
+                "INFERRED": "#2563eb",
+                "UNKNOWN": "#b45309",
+            }
+            for ev in report.evidence:
+                c_color = conf_colors.get(ev.confidence.value, "#475569")
+                ev_rows.append(
+                    [
+                        Paragraph(sanitize_for_report(ev.id), styles["TableCell"]),
+                        Paragraph(
+                            sanitize_for_report(ev.phase.replace("_", " ").title()),
+                            styles["TableCell"],
+                        ),
+                        Paragraph(
+                            f"<font color='{c_color}'><b>{sanitize_for_report(ev.confidence.value)}</b></font>",
+                            styles["TableCellBold"],
+                        ),
+                        Paragraph(
+                            sanitize_for_report(ev.source_endpoint or "API Endpoint"),
+                            styles["TableCell"],
+                        ),
+                        Paragraph(sanitize_for_report(ev.summary), styles["TableCell"]),
+                    ]
+                )
 
-        ev_table = Table(ev_rows, colWidths=[100, 95, 65, 120, 160])
-        ev_table.setStyle(
-            TableStyle(
-                [
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
-                    ("BOX", (0, 0), (-1, -1), 1, colors.HexColor("#cbd5e1")),
-                    ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#e2e8f0")),
-                    ("TOPPADDING", (0, 0), (-1, -1), 3),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-                ]
+            ev_table = Table(ev_rows, colWidths=[100, 95, 65, 120, 160], repeatRows=1)
+            ev_table.setStyle(
+                TableStyle(
+                    [
+                        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
+                        ("BOX", (0, 0), (-1, -1), 1, colors.HexColor("#cbd5e1")),
+                        ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#e2e8f0")),
+                        ("TOPPADDING", (0, 0), (-1, -1), 3),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                    ]
+                )
             )
-        )
-        story.append(ev_table)
+            story.append(ev_table)
         story.append(Spacer(1, 14))
 
         # =====================================================================

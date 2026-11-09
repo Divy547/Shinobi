@@ -8,6 +8,12 @@ from urllib.parse import urlparse
 
 import httpx
 
+from repovet_mcp.services.security import (
+    redact_secrets,
+    validate_repo_component,
+    validate_repository_url_domain,
+)
+
 logger = logging.getLogger("repovet_mcp.github")
 
 
@@ -24,7 +30,7 @@ class RepositoryNotFoundError(GitHubAPIError):
 
 
 def parse_repository_target(target: str) -> tuple[str, str]:
-    """Extract owner and repo name from owner/repo shorthand or GitHub URL.
+    """Extract and strictly validate owner and repo name from shorthand or GitHub URL.
 
     Examples:
         - "pallets/flask" -> ("pallets", "flask")
@@ -33,30 +39,31 @@ def parse_repository_target(target: str) -> tuple[str, str]:
         - "git@github.com:pallets/flask.git" -> ("pallets", "flask")
     """
     clean_target = target.strip()
-    # Check for full URL
     if clean_target.startswith(("http://", "https://")):
+        # Validate authorized domain to prevent SSRF
+        validate_repository_url_domain(clean_target)
         parsed = urlparse(clean_target)
         parts = [p for p in parsed.path.strip("/").split("/") if p]
         if len(parts) >= 2:
-            owner = parts[0]
-            repo = parts[1].removesuffix(".git")
+            owner = validate_repo_component(parts[0], "owner")
+            repo = validate_repo_component(parts[1].removesuffix(".git"), "repository")
             return owner, repo
     elif clean_target.startswith("git@github.com:"):
         path = clean_target.removeprefix("git@github.com:")
         parts = [p for p in path.strip("/").split("/") if p]
         if len(parts) >= 2:
-            owner = parts[0]
-            repo = parts[1].removesuffix(".git")
+            owner = validate_repo_component(parts[0], "owner")
+            repo = validate_repo_component(parts[1].removesuffix(".git"), "repository")
             return owner, repo
 
     # Assume owner/repo shorthand
     match = re.match(r"^([\w\-\.]+)/([\w\-\.]+)$", clean_target)
     if match:
-        owner = match.group(1)
-        repo = match.group(2).removesuffix(".git")
+        owner = validate_repo_component(match.group(1), "owner")
+        repo = validate_repo_component(match.group(2).removesuffix(".git"), "repository")
         return owner, repo
 
-    msg = f"Unable to parse repository owner and name from target: '{target}'"
+    msg = f"Unable to parse repository owner and name from target: '{clean_target}'"
     raise ValueError(msg)
 
 
@@ -137,18 +144,18 @@ class GitHubClient:
                 reset_time = response.headers.get("x-ratelimit-reset", "unknown")
                 msg = f"GitHub API rate limit exhausted. Resets at: {reset_time}"
                 logger.error(msg)
-                raise RateLimitExceededError(msg)
-                continue
+                raise RateLimitExceededError(redact_secrets(msg))
             if response.status_code >= 500:
                 if attempt > max_retries:
                     msg = f"GitHub API server error: {response.status_code}"
-                    raise GitHubAPIError(msg)
+                    raise GitHubAPIError(redact_secrets(msg))
                 await asyncio.sleep(backoff)
                 backoff *= 2
                 continue
 
-            # Other 4xx client errors
-            msg = f"GitHub API request failed: {response.status_code} - {response.text}"
+            # Other 4xx client errors (e.g. 400, 401, 422 - not retried)
+            clean_err = redact_secrets(response.text)
+            msg = f"GitHub API request failed: {response.status_code} - {clean_err}"
             raise GitHubAPIError(msg)
 
         return None
