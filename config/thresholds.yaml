@@ -1,0 +1,76 @@
+# ==============================================================================
+# RepoVet MCP - Decision Thresholds & Hard Blocker Rules
+# Configures the final verdict logic (0-20 scale):
+# APPROVE, CONDITIONAL, NEEDS MANUAL REVIEW, REJECT
+# ==============================================================================
+
+version: "1.0.0"
+
+decisions:
+  APPROVE:
+    name: "Approve for Contribution"
+    score_range:
+      min: 16
+      max: 20
+    summary: "Repository exhibits high health, responsive maintainers, strong CI/CD, and welcoming documentation. Highly recommended for contribution and GSoC proposals."
+    requires_zero_blockers: true
+
+  CONDITIONAL:
+    name: "Conditional Approval"
+    score_range:
+      min: 11
+      max: 15
+    summary: "Repository is generally healthy and viable, but contains specific gaps (e.g., slower review cycle, limited beginner issues, or missing setup nuances). Contributors should proceed with targeted caution."
+    requires_zero_blockers: true
+
+  NEEDS_MANUAL_REVIEW:
+    name: "Needs Manual Review"
+    score_range:
+      min: 8
+      max: 10
+    summary: "Ambiguous signals, conflicting evidence, or moderate concerns detected. A human reviewer must verify repository viability before investing significant effort."
+    requires_zero_blockers: false
+
+  REJECT:
+    name: "Reject / Not Recommended"
+    score_range:
+      min: 0
+      max: 7
+    summary: "Repository shows severe warning signs (inactivity, absent maintainers, broken builds, missing license, or unmanaged backlog). Not recommended for contribution."
+    requires_zero_blockers: false
+
+critical_disqualifiers:
+  - id: "unlicensed_repository"
+    name: "Missing or Invalid Open Source License"
+    condition: "No LICENSE file present or unrecognized proprietary terms."
+    action: "FORCE_DECISION"
+    target_decision: "REJECT"
+    severity: "CRITICAL"
+
+  - id: "abandoned_repository"
+    name: "Dormant / Abandoned Repository"
+    condition: "Zero commits or maintainer responses across all channels for greater than 18 months."
+    action: "FORCE_DECISION"
+    target_decision: "REJECT"
+    severity: "CRITICAL"
+
+  - id: "hostile_maintainers"
+    name: "Hostile or Abusive Communication"
+    condition: "Confirmed evidence of toxic, derogatory, or abusive maintainer behavior in public issues/PRs."
+    action: "FORCE_DECISION"
+    target_decision: "REJECT"
+    severity: "CRITICAL"
+
+  - id: "failing_default_branch"
+    name: "Broken Default Branch Build"
+    condition: "CI on default branch persistently failing with no maintainer fix or acknowledgment."
+    action: "DOWNGRADE_DECISION"
+    target_decision: "NEEDS_MANUAL_REVIEW"
+    severity: "HIGH"
+
+  - id: "untrusted_malicious_code"
+    name: "Suspicious or Obfuscated Code Patterns"
+    condition: "Potential security anomaly or suspicious build-time script detected."
+    action: "FORCE_DECISION"
+    target_decision: "NEEDS_MANUAL_REVIEW"
+    severity: "CRITICAL"

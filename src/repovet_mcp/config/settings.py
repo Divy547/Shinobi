@@ -1,0 +1,122 @@
+"""Configuration settings for RepoVet MCP using pydantic-settings."""
+
+from functools import lru_cache
+from pathlib import Path
+from typing import Any
+
+import yaml
+from pydantic import Field, SecretStr
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    """Application settings loaded from environment variables and .env file."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="REPOVET_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    # Environment & Logging
+    environment: str = Field(
+        default="development",
+        description="Deployment environment (development, staging, production, testing)",
+    )
+    log_level: str = Field(
+        default="INFO",
+        description="Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)",
+    )
+
+    # Server Identity
+    server_name: str = Field(
+        default="repovet-mcp",
+        description="Name of the MCP server instance",
+    )
+    server_version: str = Field(
+        default="0.1.0",
+        description="Version of the MCP server instance",
+    )
+
+    # GitHub API Configuration (Optional - falls back to unauthenticated public API)
+    github_token: SecretStr | None = Field(
+        default=None,
+        description="Personal access token for GitHub API (recommended to avoid rate limits)",
+    )
+    github_api_url: str = Field(
+        default="https://api.github.com",
+        description="Base URL for GitHub API operations",
+    )
+
+    # AI Provider Configuration (Optional for future Phase 2-4 analysis)
+    gemini_api_key: SecretStr | None = Field(
+        default=None,
+        description="Google Gemini API key for qualitative analysis and evidence synthesis",
+    )
+    ai_model: str = Field(
+        default="gemini-2.0-flash",
+        description="Default AI model identifier for qualitative vetting",
+    )
+
+    # Configuration File Paths
+    scoring_config_path: Path = Field(
+        default=Path("config/scoring.yaml"),
+        description="Filesystem path to the scoring rubric configuration YAML",
+    )
+    thresholds_config_path: Path = Field(
+        default=Path("config/thresholds.yaml"),
+        description="Filesystem path to the decision thresholds configuration YAML",
+    )
+
+    # Storage & Output Directories
+    reports_dir: Path = Field(
+        default=Path("reports"),
+        description="Directory for generated PDF audit reports",
+    )
+    data_dir: Path = Field(
+        default=Path("data"),
+        description="Directory for cached audit payloads and raw evidence",
+    )
+
+    @property
+    def has_github_auth(self) -> bool:
+        """Indicate whether an authenticated GitHub token is configured."""
+        return self.github_token is not None and bool(self.github_token.get_secret_value().strip())
+
+    @property
+    def has_ai_auth(self) -> bool:
+        """Indicate whether an AI provider API key is configured."""
+        return self.gemini_api_key is not None and bool(
+            self.gemini_api_key.get_secret_value().strip()
+        )
+
+    def load_scoring_config(self) -> dict[str, Any]:
+        """Load and parse the scoring YAML configuration."""
+        if not self.scoring_config_path.exists():
+            msg = f"Scoring configuration file not found at: {self.scoring_config_path}"
+            raise FileNotFoundError(msg)
+        with self.scoring_config_path.open("r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+            if not isinstance(data, dict):
+                msg = f"Invalid scoring config format in {self.scoring_config_path}"
+                raise ValueError(msg)
+            return data
+
+    def load_thresholds_config(self) -> dict[str, Any]:
+        """Load and parse the thresholds YAML configuration."""
+        if not self.thresholds_config_path.exists():
+            msg = f"Thresholds configuration file not found at: {self.thresholds_config_path}"
+            raise FileNotFoundError(msg)
+        with self.thresholds_config_path.open("r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+            if not isinstance(data, dict):
+                msg = f"Invalid thresholds config format in {self.thresholds_config_path}"
+                raise ValueError(msg)
+            return data
+
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    """Retrieve cached application settings instance."""
+    return Settings()

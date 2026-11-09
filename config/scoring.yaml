@@ -1,0 +1,123 @@
+# ==============================================================================
+# RepoVet MCP - Scoring Configuration
+# Defines the 10 scorecard criteria (0-20 scale), criteria definitions,
+# scoring rubrics (0, 1, 2), and mapping to the 9 vetting phases.
+# ==============================================================================
+
+version: "1.0.0"
+scale:
+  min_score_per_criterion: 0
+  max_score_per_criterion: 2
+  total_criteria: 10
+  max_total_score: 20
+
+criteria:
+  - id: "activity_and_maintenance"
+    name: "Project Activity & Maintenance Cadence"
+    phase: "phase_2_vitality_and_pulse"
+    weight: 1.0
+    max_score: 2
+    description: "Evaluates commit frequency, default branch freshness, and release cadence over the last 12 months."
+    rubric:
+      score_0: "Abandoned or dormant: No commits or releases within the last 12 months; archived or neglected repository."
+      score_1: "Sporadic maintenance: Commits within the last 3-6 months, but irregular release cadence or noticeable lulls in activity."
+      score_2: "Vibrant and continuous: Regular commits within the past 30 days, documented release history, and clear active maintenance."
+
+  - id: "maintainer_responsiveness"
+    name: "Maintainer Responsiveness & Review Velocity"
+    phase: "phase_4_responsiveness_and_velocity"
+    weight: 1.0
+    max_score: 2
+    description: "Evaluates maintainer interaction time, issue triage speed, and PR review turnaround."
+    rubric:
+      score_0: "Unresponsive: Pull requests and issues languish unreviewed for >60 days; high contributor abandonment rate."
+      score_1: "Moderate responsiveness: Maintainers respond within weeks, but reviews are sporadic or PR backlog is accumulating."
+      score_2: "High velocity & welcoming: Median response time <72 hours, constructive feedback, active code reviews and regular merges."
+
+  - id: "documentation_and_setup"
+    name: "Documentation & Local Environment Setup"
+    phase: "phase_5_documentation_and_onboarding"
+    weight: 1.0
+    max_score: 2
+    description: "Evaluates README clarity, architecture documentation, prerequisites, and reproducible local setup."
+    rubric:
+      score_0: "Deficient: Missing, empty, or outdated README; no local setup or build instructions."
+      score_1: "Partial: Basic README explaining project overview, but missing prerequisites, troubleshooting, or complete dev setup."
+      score_2: "Exemplary: Comprehensive README, clear architecture overview, step-by-step local build/test setup, and prerequisites."
+
+  - id: "contribution_guidelines"
+    name: "Contribution Guidelines & Process Standards"
+    phase: "phase_5_documentation_and_onboarding"
+    weight: 1.0
+    max_score: 2
+    description: "Evaluates presence and quality of CONTRIBUTING.md, pull request templates, and development guidelines."
+    rubric:
+      score_0: "Absent: No CONTRIBUTING.md or guidance; external contributors must guess workflow and expectations."
+      score_1: "Basic: CONTRIBUTING.md exists but lacks details on branch conventions, commit formatting, or test requirements."
+      score_2: "Standardized: Thorough CONTRIBUTING.md covering git workflow, code formatting, PR templates, and pre-submission checks."
+
+  - id: "community_and_conduct"
+    name: "Community Health & Code of Conduct"
+    phase: "phase_3_governance_and_culture"
+    weight: 1.0
+    max_score: 2
+    description: "Evaluates community culture, Code of Conduct presence, enforcement clarity, and communication channels."
+    rubric:
+      score_0: "Hostile or unmanaged: Hostile/abrasive communication observed, or absence of standard conduct guidelines."
+      score_1: "Standard: Standard CODE_OF_CONDUCT.md present, but minimal community interaction history or absent discussion channels."
+      score_2: "Inclusive & accessible: Clear CODE_OF_CONDUCT.md with reporting contacts, welcoming tone, active chat/Discussions channels."
+
+  - id: "issue_hygiene_and_onboarding"
+    name: "Issue Hygiene & Newcomer Accessibility"
+    phase: "phase_6_issue_hygiene_and_accessibility"
+    weight: 1.0
+    max_score: 2
+    description: "Evaluates issue curation, triage labels ('good first issue', 'help wanted'), and issue templates."
+    rubric:
+      score_0: "Chaotic: Uncurated issue backlog; no issue templates; zero newcomer or beginner-friendly issues."
+      score_1: "Moderate: Issue templates exist and occasional beginner labels are used, but backlog contains many stale/unaddressed items."
+      score_2: "Curated & newcomer-ready: Well-triage backlog, clear issue templates, and actively maintained 'good first issue' / GSoC labels."
+
+  - id: "ci_cd_and_testing"
+    name: "CI/CD & Automated Testing Rigor"
+    phase: "phase_7_ci_cd_and_testing"
+    weight: 1.0
+    max_score: 2
+    description: "Evaluates automated continuous integration workflows, test suite completeness, and default branch build status."
+    rubric:
+      score_0: "Untested / broken: No automated CI workflows, absent test suite, or persistently failing default branch build."
+      score_1: "Partial CI: Automated CI present, but test suite coverage is sparse, tests are flaky, or builds occasionally fail."
+      score_2: "Robust & green: Passing automated CI on default branch, comprehensive test suite (unit + integration), and lint/format checks."
+
+  - id: "dependency_and_supply_chain"
+    name: "Dependency Health & Supply Chain Posture"
+    phase: "phase_8_dependencies_and_security"
+    weight: 1.0
+    max_score: 2
+    description: "Evaluates dependency currency, lockfile presence, automated dependency bots, and known vulnerabilities."
+    rubric:
+      score_0: "High risk: Severely outdated dependencies, missing lockfiles, or unresolved known high/critical CVE advisories."
+      score_1: "Moderate risk: Lockfiles committed and reasonably maintained dependencies, but minor warnings or absent automated update bots."
+      score_2: "Well-maintained: Pinned modern dependencies, lockfiles tracked, Dependabot/Renovate active, zero critical/high CVEs."
+
+  - id: "security_and_licensing"
+    name: "Security Posture & License Compliance"
+    phase: "phase_1_identity_and_licensing"
+    weight: 1.0
+    max_score: 2
+    description: "Evaluates open-source licensing validity, SECURITY.md policy, and contribution legal agreements (CLA/DCO)."
+    rubric:
+      score_0: "Unlicensed / High liability: Missing LICENSE file, unrecognized non-OSI license, or severe intellectual property ambiguity."
+      score_1: "Compliant license: Valid OSI-approved license present, but lacking published SECURITY.md vulnerability reporting policy."
+      score_2: "Fully verified: Recognized OSI license, published SECURITY.md policy, and explicit contributor agreement (DCO/CLA)."
+
+  - id: "mentorship_and_gsoc_feasibility"
+    name: "Mentorship Capability & GSoC Alignment"
+    phase: "phase_9_mentorship_and_gsoc"
+    weight: 1.0
+    max_score: 2
+    description: "Evaluates suitability for GSoC / mentorship, mentor availability, past GSoC participation, and project idea lists."
+    rubric:
+      score_0: "Unsuitable: Project does not accept student contributors, has no bandwidth for mentorship, or lacks public project roadmap."
+      score_1: "Potential: Receptive to contributions, but no formal mentorship track record, uncurated project ideas, or limited guidance."
+      score_2: "Established mentorship: Active GSoC participating org or proven mentorship track record, published project ideas, dedicated mentors."
