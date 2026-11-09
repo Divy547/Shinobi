@@ -149,7 +149,7 @@ Or build directly from source:
 ```bash
 git clone https://github.com/github/github-mcp-server.git
 cd github-mcp-server
-go build -o github-mcp-server .
+go build -o github-mcp-server ./cmd/github-mcp-server
 ```
 
 ---
