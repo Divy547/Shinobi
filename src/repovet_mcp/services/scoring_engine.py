@@ -302,7 +302,11 @@ class ScoringEngine:
         newcomer_closed = newcomer_metrics.get("newcomer_prs_closed", 0)
         newcomer_sample = newcomer_metrics.get("newcomer_prs_sample_count", 0)
         newcomer_rate = newcomer_metrics.get("newcomer_merge_rate", 0.0)
-        total_prs = len(raw_repository.get("pull_requests", []))
+        total_prs = responsiveness_metrics.get("total_prs_evaluated")
+        if total_prs is None:
+            total_prs = newcomer_metrics.get("total_prs_evaluated")
+        if total_prs is None:
+            total_prs = len(raw_repository.get("pull_requests", []))
 
         if newcomer_merged >= 5 or (newcomer_rate >= 60.0 and newcomer_merged >= 2):
             c6_score = 2

@@ -84,6 +84,7 @@ class NewcomerService:
                     closed_beginner_issues_count += 1
 
         return {
+            "total_prs_evaluated": len(pull_requests),
             "newcomer_prs_sample_count": newcomer_prs_count,
             "newcomer_prs_closed": newcomer_prs_closed,
             "newcomer_prs_merged": newcomer_prs_merged,

@@ -284,17 +284,29 @@ def test_scoring_engine_newcomer_denominator_closed_vs_evaluated() -> None:
     assert newcomer_metrics["newcomer_merge_rate"] == 0.0
 
     engine = ScoringEngine()
+    # Test production input contract: raw_repository is repo_meta (no "pull_requests" key)
+    repo_meta = {
+        "name": "pipelines",
+        "owner": {"login": "kubeflow"},
+        "html_url": "https://github.com/kubeflow/pipelines",
+        "default_branch": "master",
+    }
+    responsiveness_metrics = {
+        "total_prs_evaluated": len(pull_requests),
+        "prs_with_human_response_count": 0,
+    }
+
     scorecard, _, _ = engine.evaluate_scorecard(
         audit_id="audit_denominator_check",
         activity_metrics={},
         contributor_metrics={},
-        responsiveness_metrics={},
+        responsiveness_metrics=responsiveness_metrics,
         newcomer_metrics=newcomer_metrics,
         documentation_metrics={},
         ci_security_metrics={},
         hard_gates=[],
         evidence_list=[],
-        raw_repository={"pull_requests": pull_requests},
+        raw_repository=repo_meta,
     )
 
     newcomer_crit = next(
@@ -302,6 +314,56 @@ def test_scoring_engine_newcomer_denominator_closed_vs_evaluated() -> None:
     )
     expected_rationale = "Zero newcomer PRs merged out of 12 closed newcomer PRs (15 evaluated in the 100 most recent PRs)."
     assert newcomer_crit.rationale == expected_rationale
+
+
+def test_scoring_engine_newcomer_sample_window_from_actual_input_contract() -> None:
+    """Verify scorecard correctly reports sample-window count when raw_repository has no pull_requests."""
+    pull_requests = [
+        {
+            "number": 1,
+            "state": "closed",
+            "author_association": "NONE",
+            "merged_at": None,
+            "user": {"login": "u1"},
+        }
+    ] + [
+        {
+            "number": i,
+            "state": "closed",
+            "author_association": "MEMBER",
+            "merged_at": "2026-11-01T00:00:00Z",
+            "user": {"login": f"m{i}"},
+        }
+        for i in range(2, 51)
+    ]
+    # 50 PRs evaluated, 1 newcomer closed PR (0 merged)
+    newcomer_service = NewcomerService()
+    newcomer_metrics = newcomer_service.analyze_newcomers(issues=[], pull_requests=pull_requests)
+    assert newcomer_metrics["total_prs_evaluated"] == 50
+
+    # Pass repo_meta without pull_requests
+    repo_meta = {"name": "test-repo", "owner": {"login": "org"}}
+    resp_metrics = {"total_prs_evaluated": 50}
+
+    engine = ScoringEngine()
+    scorecard, _, _ = engine.evaluate_scorecard(
+        audit_id="audit_contract_check",
+        activity_metrics={},
+        contributor_metrics={},
+        responsiveness_metrics=resp_metrics,
+        newcomer_metrics=newcomer_metrics,
+        documentation_metrics={},
+        ci_security_metrics={},
+        hard_gates=[],
+        evidence_list=[],
+        raw_repository=repo_meta,
+    )
+
+    newcomer_crit = next(
+        c for c in scorecard.criteria_scores if c.criterion_id == "newcomer_prs_merged"
+    )
+    assert "1 evaluated in the 50 most recent PRs" in newcomer_crit.rationale
+    assert " 0 most recent PRs" not in newcomer_crit.rationale
 
 
 def test_scoring_engine_community_capped_at_one_without_verified_chat() -> None:

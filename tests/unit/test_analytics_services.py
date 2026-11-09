@@ -88,6 +88,7 @@ def test_newcomer_service() -> None:
 
     metrics = service.analyze_newcomers(data["issues"], data["pull_requests"])
 
+    assert metrics["total_prs_evaluated"] == len(data["pull_requests"])
     assert metrics["newcomer_prs_sample_count"] == 1
     assert metrics["newcomer_prs_merged"] == 1
     assert metrics["newcomer_merge_rate"] == 100.0
