@@ -271,12 +271,18 @@ class GitHubClient:
         return []
 
     async def get_workflow_runs(
-        self, client: httpx.AsyncClient, owner: str, repo: str, per_page: int = 25
+        self,
+        client: httpx.AsyncClient,
+        owner: str,
+        repo: str,
+        per_page: int = 25,
+        branch: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Fetch recent GitHub Actions workflow runs."""
-        data = await self._request(
-            client, f"/repos/{owner}/{repo}/actions/runs", params={"per_page": per_page}
-        )
+        """Fetch recent GitHub Actions workflow runs, optionally filtered by branch."""
+        params: dict[str, Any] = {"per_page": per_page}
+        if branch:
+            params["branch"] = branch
+        data = await self._request(client, f"/repos/{owner}/{repo}/actions/runs", params=params)
         if isinstance(data, dict) and "workflow_runs" in data:
             return data["workflow_runs"]
         return []
@@ -336,6 +342,32 @@ class GitHubClient:
             community_profile = clean_results["community_profile"]
             workflows = clean_results["workflows"]
             workflow_runs = clean_results["workflow_runs"]
+
+            # If workflows exist but none of the initial workflow runs belong to the default branch,
+            # execute a single bounded query specifically targeting the repository's actual default branch.
+            default_branch = (repo_meta or {}).get("default_branch") or "main"
+            runs_list = workflow_runs if isinstance(workflow_runs, list) else []
+            has_default_run = any(
+                isinstance(r, dict) and r.get("head_branch") == default_branch for r in runs_list
+            )
+            if workflows and not has_default_run:
+                try:
+                    default_branch_runs = await self.get_workflow_runs(
+                        client, owner, repo, per_page=10, branch=default_branch
+                    )
+                    if isinstance(default_branch_runs, list) and default_branch_runs:
+                        if isinstance(workflow_runs, list):
+                            workflow_runs.extend(default_branch_runs)
+                        else:
+                            workflow_runs = default_branch_runs
+                except Exception as err:
+                    logger.debug(
+                        "Failed to fetch default branch (%s) workflow runs for %s/%s: %s",
+                        default_branch,
+                        owner,
+                        repo,
+                        err,
+                    )
 
             # Separate true issues from pull requests in the issues list
             raw_issues_list = all_issues if isinstance(all_issues, list) else []

@@ -283,7 +283,7 @@ Evaluates mandatory eligibility gates that instantly disqualify a repository or 
 - **Evaluated Hard Gates**:
   1. *License Validity*: Ensures an OSI-approved permissive/copyleft license exists.
   2. *Repository Dormancy*: Ensures commits exist within the last 365 days.
-  3. *Default Branch CI*: Verifies default branch builds are passing if CI workflows exist.
+  3. *Default Branch CI*: Verifies default branch builds are passing if CI workflows exist (evaluates all collected workflow runs with targeted default-branch inspection; explicitly maps GitHub Actions conclusions: `success` $\rightarrow$ PASS, unsuccessful runs like `failure`/`timed_out`/`cancelled`/`action_required` $\rightarrow$ FAIL, and non-determinative runs like `neutral`/`skipped`/`stale`/in-progress $\rightarrow$ UNKNOWN).
   4. *Root Directory Binary Check*: Confirms no precompiled executable files (.exe, .dll, .so, .bin, .out) reside in the repository root. Note: subdirectories and package build scripts are not scanned.
 - **Returns**: Individual gate outcomes (`PASS`, `FAIL`, `UNKNOWN`), severity, evaluation rationale, and blockers count.
 

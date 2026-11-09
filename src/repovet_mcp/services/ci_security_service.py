@@ -20,6 +20,14 @@ OSI_APPROVED_SPDX = {
     "CC0-1.0",
 }
 
+# Documented GitHub Actions workflow run conclusions
+# https://docs.github.com/en/rest/actions/workflow-runs
+CI_SUCCESS_CONCLUSIONS: frozenset[str] = frozenset({"success"})
+CI_FAILURE_CONCLUSIONS: frozenset[str] = frozenset(
+    {"failure", "timed_out", "cancelled", "action_required", "startup_failure"}
+)
+CI_UNKNOWN_CONCLUSIONS: frozenset[str] = frozenset({"neutral", "skipped", "stale"})
+
 
 class CISecurityService:
     """Analyzes CI/CD pipeline health, test structure, and license compliance."""
@@ -50,22 +58,47 @@ class CISecurityService:
         # 3. CI Workflows & Runs Analysis
         has_workflows = len(workflows) > 0
         total_runs = len(workflow_runs)
-        recent_runs = workflow_runs[:10]
+        recent_runs = workflow_runs[:25]
 
-        successful_runs = sum(1 for run in recent_runs if run.get("conclusion") == "success")
+        successful_runs = sum(
+            1 for run in recent_runs if run.get("conclusion") in CI_SUCCESS_CONCLUSIONS
+        )
         failed_runs = sum(
-            1 for run in recent_runs if run.get("conclusion") in ("failure", "timed_out")
+            1 for run in recent_runs if run.get("conclusion") in CI_FAILURE_CONCLUSIONS
         )
 
-        default_branch = repository_data.get("default_branch", "main")
+        default_branch = (repository_data or {}).get("default_branch") or "main"
         default_branch_runs = [
-            run for run in recent_runs if run.get("head_branch") == default_branch
+            run
+            for run in workflow_runs
+            if isinstance(run, dict) and run.get("head_branch") == default_branch
         ]
 
+        # Prioritize completed runs on the default branch to evaluate confirmed pass/fail status
+        completed_default_runs = [
+            run for run in default_branch_runs if run.get("conclusion") is not None
+        ]
+        latest_completed_run = completed_default_runs[0] if completed_default_runs else None
         latest_default_run = default_branch_runs[0] if default_branch_runs else None
-        latest_ci_conclusion = latest_default_run.get("conclusion") if latest_default_run else None
 
-        ci_passing_on_default = latest_ci_conclusion == "success" if latest_default_run else None
+        if latest_completed_run:
+            latest_ci_conclusion = latest_completed_run.get("conclusion")
+            if latest_ci_conclusion in CI_SUCCESS_CONCLUSIONS:
+                ci_passing_on_default = True
+            elif latest_ci_conclusion in CI_FAILURE_CONCLUSIONS:
+                ci_passing_on_default = False
+            else:
+                # Non-determinative completed conclusions ("neutral", "skipped", "stale", or unrecognized)
+                ci_passing_on_default = None
+        elif latest_default_run:
+            # Runs exist on default branch but have not yet concluded (e.g. in_progress, queued)
+            latest_ci_conclusion = latest_default_run.get("conclusion") or latest_default_run.get(
+                "status"
+            )
+            ci_passing_on_default = None
+        else:
+            latest_ci_conclusion = None
+            ci_passing_on_default = None
 
         # 4. Safe Read-Only Root Directory Binary Check
         root_binary_detected = False

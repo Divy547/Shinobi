@@ -257,13 +257,32 @@ class HardGatesService:
                 )
             )
         else:
+            latest_ci_conclusion = ci_security_metrics.get("latest_default_branch_ci_conclusion")
+            if latest_ci_conclusion in (
+                "in_progress",
+                "queued",
+                "waiting",
+                "requested",
+                "pending",
+            ):
+                gate_reason = (
+                    f"CI workflows exist, but latest run is currently '{latest_ci_conclusion}'; "
+                    "completed build verification is not yet available."
+                )
+            elif latest_ci_conclusion:
+                gate_reason = (
+                    f"CI workflows exist, but latest run concluded with '{latest_ci_conclusion}'; "
+                    "automated test health cannot be confirmed."
+                )
+            else:
+                gate_reason = "CI workflows exist, but no recent workflow run logs were retrieved."
             results.append(
                 HardGateResult(
                     gate_id="failing_default_branch",
                     name="Default Branch CI Status",
                     status=HardGateStatus.UNKNOWN,
                     severity="HIGH",
-                    reason="CI workflows exist, but no recent workflow run logs were retrieved.",
+                    reason=gate_reason,
                     evidence_ids=[ev_ci.id],
                 )
             )

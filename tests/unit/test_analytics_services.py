@@ -3,6 +3,8 @@
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import pytest
+
 from repovet_mcp.models.audit import HardGateStatus
 from repovet_mcp.services.activity_service import ActivityService
 from repovet_mcp.services.ci_security_service import CISecurityService
@@ -237,6 +239,237 @@ def test_ci_security_service() -> None:
     assert metrics["has_ci_workflows"] is True
     assert metrics["ci_passing_on_default_branch"] is True
     assert metrics["suspicious_install_scripts"] is False
+
+
+def test_ci_security_service_discovers_default_branch_after_first_ten_pr_runs() -> None:
+    """Verify default-branch run is discovered even when preceded by more than 10 PR runs."""
+    service = CISecurityService()
+    # 14 PR runs followed by 1 successful default branch run on 'main'
+    runs: list[dict[str, Any]] = []
+    for i in range(14):
+        runs.append(
+            {
+                "id": 1000 + i,
+                "name": f"PR Check {i}",
+                "head_branch": f"feature-pr-{i}",
+                "conclusion": "success",
+                "status": "completed",
+            }
+        )
+    runs.append(
+        {
+            "id": 1015,
+            "name": "Default Branch CI",
+            "head_branch": "main",
+            "conclusion": "success",
+            "status": "completed",
+        }
+    )
+
+    metrics = service.analyze_ci_and_security(
+        repository_data={"default_branch": "main"},
+        workflows=[{"id": 1, "name": "CI"}],
+        workflow_runs=runs,
+        root_contents=[],
+    )
+
+    assert metrics["ci_passing_on_default_branch"] is True
+    assert metrics["latest_default_branch_ci_conclusion"] == "success"
+
+
+def test_ci_security_service_distinguishes_confirmed_failing_on_custom_default_branch() -> None:
+    """Verify confirmed failing CI on custom default branch (e.g., 'trunk') after PR runs."""
+    service = CISecurityService()
+    runs: list[dict[str, Any]] = []
+    for i in range(12):
+        runs.append(
+            {
+                "id": 2000 + i,
+                "head_branch": f"patch-{i}",
+                "conclusion": "success",
+                "status": "completed",
+            }
+        )
+    runs.append(
+        {
+            "id": 2013,
+            "head_branch": "trunk",
+            "conclusion": "failure",
+            "status": "completed",
+        }
+    )
+
+    metrics = service.analyze_ci_and_security(
+        repository_data={"default_branch": "trunk"},
+        workflows=[{"id": 1, "name": "CI"}],
+        workflow_runs=runs,
+        root_contents=[],
+    )
+
+    assert metrics["ci_passing_on_default_branch"] is False
+    assert metrics["latest_default_branch_ci_conclusion"] == "failure"
+
+
+def test_ci_security_service_distinguishes_genuinely_unavailable_when_no_default_runs() -> None:
+    """Verify UNKNOWN / unavailable CI status when all workflow runs belong to feature branches."""
+    service = CISecurityService()
+    runs = [
+        {
+            "id": 3000 + i,
+            "head_branch": f"feature-{i}",
+            "conclusion": "success",
+            "status": "completed",
+        }
+        for i in range(15)
+    ]
+
+    metrics = service.analyze_ci_and_security(
+        repository_data={"default_branch": "main"},
+        workflows=[{"id": 1, "name": "CI"}],
+        workflow_runs=runs,
+        root_contents=[],
+    )
+
+    assert metrics["ci_passing_on_default_branch"] is None
+    assert metrics["latest_default_branch_ci_conclusion"] is None
+
+    # Hard gate evaluation on unavailable CI status
+    gate_service = HardGatesService()
+    gates, _, _ = gate_service.evaluate_gates(
+        "audit_test_ci_unknown",
+        {"is_abandoned": False, "latest_commit_date": "2026-11-01T00:00:00Z"},
+        metrics,
+        {"default_branch": "main", "license": {"spdx_id": "MIT"}},
+    )
+    ci_gate = next(g for g in gates if g.gate_id == "failing_default_branch")
+    assert ci_gate.status == HardGateStatus.UNKNOWN
+    assert "no recent workflow run logs were retrieved" in ci_gate.reason
+
+
+def test_ci_security_service_handles_in_progress_and_completed_runs() -> None:
+    """Verify that an in-progress run does not mask the latest completed build conclusion."""
+    service = CISecurityService()
+    runs = [
+        # In-progress run on main
+        {"id": 4001, "head_branch": "main", "conclusion": None, "status": "in_progress"},
+        # Prior completed run on main
+        {"id": 4000, "head_branch": "main", "conclusion": "success", "status": "completed"},
+    ]
+
+    metrics = service.analyze_ci_and_security(
+        repository_data={"default_branch": "main"},
+        workflows=[{"id": 1, "name": "CI"}],
+        workflow_runs=runs,
+        root_contents=[],
+    )
+
+    assert metrics["ci_passing_on_default_branch"] is True
+    assert metrics["latest_default_branch_ci_conclusion"] == "success"
+
+
+@pytest.mark.parametrize(
+    ("conclusion", "expected_passing", "expected_gate_status"),
+    [
+        ("success", True, HardGateStatus.PASS),
+        ("failure", False, HardGateStatus.FAIL),
+        ("timed_out", False, HardGateStatus.FAIL),
+        ("cancelled", False, HardGateStatus.FAIL),
+        ("action_required", False, HardGateStatus.FAIL),
+        ("startup_failure", False, HardGateStatus.FAIL),
+        ("neutral", None, HardGateStatus.UNKNOWN),
+        ("skipped", None, HardGateStatus.UNKNOWN),
+        ("stale", None, HardGateStatus.UNKNOWN),
+    ],
+)
+def test_ci_security_service_explicit_conclusions_mapping(
+    conclusion: str, expected_passing: bool | None, expected_gate_status: HardGateStatus
+) -> None:
+    """Verify that every documented GitHub Actions conclusion maps to PASS, FAIL, or UNKNOWN."""
+    service = CISecurityService()
+    runs = [
+        {
+            "id": 5001,
+            "head_branch": "main",
+            "conclusion": conclusion,
+            "status": "completed",
+        }
+    ]
+
+    metrics = service.analyze_ci_and_security(
+        repository_data={"default_branch": "main"},
+        workflows=[{"id": 1, "name": "CI"}],
+        workflow_runs=runs,
+        root_contents=[],
+    )
+
+    assert metrics["ci_passing_on_default_branch"] is expected_passing
+    assert metrics["latest_default_branch_ci_conclusion"] == conclusion
+
+    # Verify hard gate mapping
+    gate_service = HardGatesService()
+    gates, _, findings = gate_service.evaluate_gates(
+        f"audit_test_ci_{conclusion}",
+        {"is_abandoned": False, "latest_commit_date": "2026-11-01T00:00:00Z"},
+        metrics,
+        {"default_branch": "main", "license": {"spdx_id": "MIT"}},
+    )
+    ci_gate = next(g for g in gates if g.gate_id == "failing_default_branch")
+    assert ci_gate.status == expected_gate_status
+
+    if expected_gate_status == HardGateStatus.FAIL:
+        assert any(f.id.endswith("_find_broken_ci") for f in findings)
+    elif expected_gate_status == HardGateStatus.UNKNOWN:
+        assert not any(f.id.endswith("_find_broken_ci") for f in findings)
+        assert f"concluded with '{conclusion}'" in ci_gate.reason
+
+
+def test_ci_security_service_in_progress_does_not_mask_prior_failure() -> None:
+    """Verify that an in-progress run does not mask a prior failed build conclusion."""
+    service = CISecurityService()
+    runs = [
+        {"id": 6002, "head_branch": "main", "conclusion": None, "status": "in_progress"},
+        {"id": 6001, "head_branch": "main", "conclusion": "failure", "status": "completed"},
+    ]
+
+    metrics = service.analyze_ci_and_security(
+        repository_data={"default_branch": "main"},
+        workflows=[{"id": 1, "name": "CI"}],
+        workflow_runs=runs,
+        root_contents=[],
+    )
+
+    assert metrics["ci_passing_on_default_branch"] is False
+    assert metrics["latest_default_branch_ci_conclusion"] == "failure"
+
+
+def test_ci_security_service_only_in_progress_or_queued_runs() -> None:
+    """Verify that when only in-progress or queued runs exist, status is UNKNOWN."""
+    service = CISecurityService()
+    runs = [
+        {"id": 7002, "head_branch": "main", "conclusion": None, "status": "in_progress"},
+        {"id": 7001, "head_branch": "main", "conclusion": None, "status": "queued"},
+    ]
+
+    metrics = service.analyze_ci_and_security(
+        repository_data={"default_branch": "main"},
+        workflows=[{"id": 1, "name": "CI"}],
+        workflow_runs=runs,
+        root_contents=[],
+    )
+
+    assert metrics["ci_passing_on_default_branch"] is None
+    assert metrics["latest_default_branch_ci_conclusion"] == "in_progress"
+
+    gate_service = HardGatesService()
+    gates, _, _ = gate_service.evaluate_gates(
+        "audit_test_ci_in_progress",
+        {"is_abandoned": False, "latest_commit_date": "2026-11-01T00:00:00Z"},
+        metrics,
+        {"default_branch": "main", "license": {"spdx_id": "MIT"}},
+    )
+    ci_gate = next(g for g in gates if g.gate_id == "failing_default_branch")
+    assert ci_gate.status == HardGateStatus.UNKNOWN
+    assert "currently 'in_progress'" in ci_gate.reason
 
 
 def test_hard_gates_service_pass() -> None:

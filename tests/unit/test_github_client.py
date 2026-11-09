@@ -319,3 +319,126 @@ async def test_collect_repository_data_skips_missing_targeted_dirs() -> None:
         assert ".github" not in result["targeted_contents"]
         assert "/repos/owner/repo/contents/docs" not in requested_paths
         assert "/repos/owner/repo/contents/docs/outreach" not in requested_paths
+
+
+@pytest.mark.asyncio
+async def test_collect_repository_data_discovers_default_branch_run_when_displaced() -> None:
+    """Verify targeted default branch query is executed when initial workflow runs lack default branch."""
+    requested_urls: list[str] = []
+
+    def mock_handler(request: httpx.Request) -> httpx.Response:
+        url_str = str(request.url)
+        requested_urls.append(url_str)
+        path = request.url.path
+
+        if path == "/repos/owner/repo":
+            return httpx.Response(
+                200, json={"name": "repo", "owner": {"login": "owner"}, "default_branch": "main"}
+            )
+        if path == "/repos/owner/repo/actions/workflows":
+            return httpx.Response(200, json={"workflows": [{"id": 1, "name": "CI"}]})
+        if path == "/repos/owner/repo/actions/runs":
+            branch = request.url.params.get("branch")
+            if branch == "main":
+                # Targeted query for default branch
+                return httpx.Response(
+                    200,
+                    json={
+                        "workflow_runs": [
+                            {
+                                "id": 9999,
+                                "name": "CI Tests",
+                                "head_branch": "main",
+                                "conclusion": "success",
+                                "status": "completed",
+                            }
+                        ]
+                    },
+                )
+            # General runs query: 15 runs all on PR branches
+            return httpx.Response(
+                200,
+                json={
+                    "workflow_runs": [
+                        {
+                            "id": 100 + i,
+                            "name": "PR Check",
+                            "head_branch": f"pr-{i}",
+                            "conclusion": "success",
+                            "status": "completed",
+                        }
+                        for i in range(15)
+                    ]
+                },
+            )
+        return httpx.Response(200, json=[])
+
+    transport = httpx.MockTransport(mock_handler)
+    gh = GitHubClient()
+    original_client = httpx.AsyncClient
+
+    def mock_async_client(**kwargs: object) -> httpx.AsyncClient:
+        kwargs["transport"] = transport
+        return original_client(**kwargs)  # type: ignore[arg-type]
+
+    import unittest.mock
+
+    with unittest.mock.patch("httpx.AsyncClient", side_effect=mock_async_client):
+        result = await gh.collect_repository_data("owner", "repo")
+        runs = result["workflow_runs"]
+        # Must contain the PR runs AND the targeted default branch run
+        assert len(runs) == 16
+        main_runs = [r for r in runs if r.get("head_branch") == "main"]
+        assert len(main_runs) == 1
+        assert main_runs[0]["id"] == 9999
+        # Targeted query URL with branch=main must have been requested
+        assert any("branch=main" in u for u in requested_urls)
+
+
+@pytest.mark.asyncio
+async def test_collect_repository_data_handles_default_branch_ci_api_error_gracefully() -> None:
+    """Verify API error on targeted default branch query does not crash data collection."""
+
+    def mock_handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/repos/owner/repo":
+            return httpx.Response(
+                200, json={"name": "repo", "owner": {"login": "owner"}, "default_branch": "trunk"}
+            )
+        if path == "/repos/owner/repo/actions/workflows":
+            return httpx.Response(200, json={"workflows": [{"id": 1, "name": "CI"}]})
+        if path == "/repos/owner/repo/actions/runs":
+            branch = request.url.params.get("branch")
+            if branch == "trunk":
+                return httpx.Response(500, text="Internal Server Error")
+            # General runs: only PR runs
+            return httpx.Response(
+                200,
+                json={
+                    "workflow_runs": [
+                        {
+                            "id": 1,
+                            "head_branch": "pr-1",
+                            "conclusion": "success",
+                            "status": "completed",
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(200, json=[])
+
+    transport = httpx.MockTransport(mock_handler)
+    gh = GitHubClient()
+    original_client = httpx.AsyncClient
+
+    def mock_async_client(**kwargs: object) -> httpx.AsyncClient:
+        kwargs["transport"] = transport
+        return original_client(**kwargs)  # type: ignore[arg-type]
+
+    import unittest.mock
+
+    with unittest.mock.patch("httpx.AsyncClient", side_effect=mock_async_client):
+        result = await gh.collect_repository_data("owner", "repo")
+        # Collection succeeds, runs retain the general PR run
+        assert len(result["workflow_runs"]) == 1
+        assert result["workflow_runs"][0]["head_branch"] == "pr-1"
