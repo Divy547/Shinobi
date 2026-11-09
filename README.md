@@ -72,12 +72,20 @@ repovet-mcp/
 │       │   ├── __init__.py
 │       │   └── vetting_tools.py # 7 registered MCP tool handlers
 │       │
+│       ├── orchestration/      # AI orchestration & multi-MCP client integration
+│       │   ├── __init__.py
+│       │   ├── gemini_orchestrator.py # Gemini function calling loop & boundary enforcement
+│       │   ├── github_mcp_client.py   # Official GitHub MCP server client (strictly read-only)
+│       │   ├── mcp_client.py          # Base async stdio MCP client abstraction
+│       │   ├── models.py              # ToolCallRecord, OrchestrationRequest/Result
+│       │   └── shinobi_mcp_client.py  # Local Shinobi deterministic MCP client
+│       │
 │       └── reporting/          # PDF generation & validation
 │           ├── __init__.py
 │           ├── pdf_generator.py # ReportLab PDF audit report compiler
 │           └── pdf_validator.py # Low-level PDF structural validator
 │
-├── tests/                      # Automated test suite (69 unit & integration tests)
+├── tests/                      # Automated test suite (81 unit & integration tests)
 │   ├── conftest.py             # Pytest fixtures & mock environments
 │   ├── fixtures/               # Mock payloads & sample repository data
 │   ├── integration/            # Stdio protocol & workflow integration tests
@@ -91,6 +99,7 @@ repovet-mcp/
 │       ├── test_github_client.py
 │       ├── test_github_client_hardening.py
 │       ├── test_imports.py
+│       ├── test_orchestration.py
 │       ├── test_pdf_generator.py
 │       ├── test_pdf_hardening.py
 │       ├── test_scoring_engine.py
@@ -217,8 +226,16 @@ Configuration parameters:
 | `REPOVET_DATA_DIR` | `data` | Directory for raw API snapshots and audit JSON files. |
 | `REPOVET_REPORTS_DIR` | `reports` | Directory where PDF reports are compiled (`reports/generated/`). |
 | `REPOVET_LOGS_DIR` | `logs` | Directory for server log outputs. |
+| `REPOVET_GEMINI_API_KEY` | *(None)* | Google Gemini API key (required for Phase 4 AI orchestration). |
+| `REPOVET_AI_MODEL` | `gemini-2.0-flash` | Gemini model for request interpretation and tool routing. |
+| `REPOVET_ORCHESTRATION_TIMEOUT_SECONDS` | `120.0` | Total session timeout for Gemini orchestration loops. |
+| `REPOVET_MCP_TIMEOUT_SECONDS` | `30.0` | Per-tool call timeout for stdio MCP clients. |
+| `REPOVET_MAX_ORCHESTRATION_STEPS` | `10` | Maximum sequential tool-call iterations per session. |
+| `REPOVET_GITHUB_MCP_COMMAND` | `npx` | Command to launch official GitHub MCP server (`npx` or `docker`). |
+| `REPOVET_GITHUB_MCP_ARGS` | `["-y", "@modelcontextprotocol/server-github"]` | Arguments for GitHub MCP server command. |
+| `REPOVET_SHINOBI_MCP_COMMAND` | `repovet-mcp` | Command to launch local Shinobi MCP server. |
 
-> **Note on LLM Keys:** In Phase 3, Shinobi is completely standalone and deterministic. No Gemini, OpenAI, or external LLM API keys are required.
+> **Note on Standalone vs Orchestration Execution:** Shinobi's vetting engine remains 100% deterministic and standalone. The server functions completely without Gemini API keys when run as a standalone MCP server. The Gemini API key is only required when invoking the Phase 4 `GeminiOrchestrator` service.
 
 ### 4. Running via stdio Transport
 
@@ -386,6 +403,96 @@ data/
 
 ---
 
+## AI Orchestration & Multi-MCP Integration (Phase 4.1)
+
+Shinobi integrates Google Gemini (`google-genai` Python SDK) with Model Context Protocol (MCP) clients to deliver autonomous repository vetting while strictly safeguarding deterministic scoring integrity.
+
+### 1. Integration Architecture
+
+```
+User Vetting Request ("Vet pallets/flask for GSoC 2027 eligibility")
+                                │
+                                ▼
+┌──────────────────────────────────────────────────────────────────┐
+│              Gemini Orchestrator (`google-genai` SDK)            │
+│  - Interprets user request & coordinates analysis                │
+│  - Controlled Function Calling with discovered MCP schemas       │
+│  - Sequential loop control (configurable step & time limits)     │
+│  - Synthesizes natural language audit explanations               │
+└───────────────────────────────┬──────────────────────────────────┘
+                                │ Controlled Tool Routing
+                ┌───────────────┴───────────────┐
+                ▼                               ▼
+┌───────────────────────────────┐ ┌───────────────────────────────┐
+│       Shinobi MCP Client      │ │       GitHub MCP Client       │
+│     (Local stdio transport)   │ │   (Official stdio transport)  │
+│ - Authoritative vetting logic │ │ - Contextual exploration      │
+│ - 7 deterministic tools       │ │ - Strictly read-only filter   │
+│ - Immutable scorecard/verdict │ │ - Write operations blocked    │
+└───────────────────────────────┘ └───────────────────────────────┘
+```
+
+### 2. Mandatory Evidence & Scoring Boundaries
+
+- **Deterministic Immutability**: Shinobi is the sole authority for scoring. Gemini **cannot** calculate, alter, or override Shinobi's 10-criterion scorecard (0–20 points) or final verdicts (`APPROVE`, `CONDITIONAL`, `REJECT`, `NEEDS MANUAL REVIEW`). Even if the model text contains an opinion or hallucinated score, programmatic contracts (`result.scorecard` and `result.decision`) strictly enforce the deterministic output from Shinobi.
+- **Evidence Separation**:
+  - `github_mcp_observations`: Read-only discovery context from the official GitHub MCP server. These are recorded separately and unverified as audit evidence.
+  - `shinobi_verified_evidence`: Grounded, primary-source evidence generated exclusively by the Shinobi vetting engine.
+- **Anti-Hallucination**: The orchestrator prevents Gemini from inventing metrics, passing empty checks, or counting observations twice.
+
+### 3. Setup & Configuration
+
+#### A. Gemini API Setup
+Obtain an API key from [Google AI Studio](https://aistudio.google.com/) and set:
+```bash
+export REPOVET_GEMINI_API_KEY="AIzaSy..."
+export REPOVET_AI_MODEL="gemini-2.0-flash"
+```
+
+#### B. Local GitHub MCP Server Setup
+The official GitHub MCP server communicates via stdio. You can run it via `npx` (Node.js 18+) or Docker:
+
+```bash
+# Option 1: NPX (Default)
+export REPOVET_GITHUB_MCP_COMMAND="npx"
+export REPOVET_GITHUB_MCP_ARGS='["-y", "@modelcontextprotocol/server-github"]'
+export GITHUB_PERSONAL_ACCESS_TOKEN="ghp_..."
+
+# Option 2: Docker
+export REPOVET_GITHUB_MCP_COMMAND="docker"
+export REPOVET_GITHUB_MCP_ARGS='["run", "-i", "--rm", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "ghcr.io/modelcontextprotocol/servers/github:latest"]'
+```
+
+#### C. Local Shinobi MCP Client Setup
+The Shinobi MCP client launches the local Shinobi server over stdio:
+```bash
+export REPOVET_SHINOBI_MCP_COMMAND="repovet-mcp"
+export REPOVET_SHINOBI_MCP_ARGS='[]'
+```
+
+### 4. Security & Permissions
+
+- **Default-Deny Positive Read-Only Allowlist**: The GitHub MCP client operates under strict default-deny security. Only verified read-only discovery tools (`get_file_contents`, `list_commits`, `get_commit`, `list_issues`, `get_issue`, `list_pull_requests`, `search_repositories`, etc.) are permitted. All write/mutating tools (`create_*`, `update_*`, `delete_*`, `push_*`, `merge_*`, `fork_*`, `add_*`) and non-prefix actions (`close_issue`, `lock_issue`, `approve_pull_request`, `dispatch_workflow`, `archive_repository`) as well as unknown tools are blocked both at discovery and immediately before execution.
+- **Session Audit ID Locking & Anti-Hijacking**: The orchestrator establishes a trusted audit session bound to the active target repository. Gemini cannot pass foreign `audit_id` arguments or switch repositories midway to obtain unearned scorecards or decisions from previous audits.
+- **Subprocess Environment Isolation**: Subprocesses are spawned in minimal, isolated environments preserving safe system essentials (`PATH`, `HOME`, temporary directories) while strictly stripping ambient host secrets (`GEMINI_API_KEY`, AWS credentials, cloud tokens). Only explicitly configured tokens (`GITHUB_PERSONAL_ACCESS_TOKEN`) reach the intended child process.
+- **Dynamic Secret Redaction**: Configured tokens, API keys, and known authorization header patterns are scrubbed dynamically from error messages and logs.
+- **Untrusted Code Policy**: Zero repository code execution. The orchestrator never executes build scripts, setup scripts, or test runners from audited repositories.
+
+### 5. Implemented vs. Deferred Capabilities
+
+| Capability | Status | Description |
+|:---|:---|:---|
+| **Gemini Function Calling Loop** | **Implemented** | Discovers MCP tool schemas, normalizes for OpenAPI 3.0, and executes controlled multi-turn loops. |
+| **Shinobi MCP Client** | **Implemented** | Connects to local Shinobi server over stdio and invokes all 7 deterministic tools. |
+| **GitHub MCP Client** | **Implemented** | Connects to official GitHub MCP server with strict default-deny read-only allowlist. |
+| **Boundary & Anti-Hijacking Protection** | **Implemented** | Enforces that Gemini cannot alter scorecards, hijack foreign audits, or switch target repositories. |
+| **Subprocess Environment Isolation** | **Implemented** | Spawns child MCP servers in isolated environments without leaking ambient host API keys. |
+| **Execution Safety Limits** | **Implemented** | Configurable iteration limits (`max_steps`) and timeout guards (`asyncio.timeout`). |
+| **Live Multi-Agent Peer Debate** | *Deferred (Phase 4.2)* | Extended multi-agent verification and peer review dialogues. |
+| **Real Repository Acceptance** | *Deferred (Phase 5)* | Live end-to-end vetting on actual candidate open-source repositories. |
+
+---
+
 ## Troubleshooting & Diagnostics
 
 - **Protocol Output Isolation**: Standard output (`stdout`) is reserved strictly for JSON-RPC MCP messages. All server diagnostics, startup messages, and errors are written to `stderr`.
@@ -394,15 +501,18 @@ data/
   - *Authenticated*: 5,000 requests/hour per token.
   - When limits are reached, Shinobi raises `RateLimitExceededError` and surfaces the reset time in UTC without crashing.
 - **Tool Error Handling**: If a tool fails (e.g., non-existent audit ID, unparseable repository target, or invalid arguments), the server returns `CallToolResult(is_error=True)` with a clear, sanitized error message. Secrets and tokens are automatically redacted.
-- **Configuration Validation**: At startup, `Settings.validate_startup_config()` verifies YAML configurations exist, storage directories are writable, and API URLs are valid HTTP/HTTPS endpoints before listening for requests.
+- **Configuration Validation**: At startup, `Settings.validate_startup_config()` verifies YAML configurations exist, storage directories are writable, and API URLs are valid HTTP/HTTPS endpoints before listening for requests. `Settings.validate_orchestration_config()` validates requirements for AI orchestration.
 
 ---
 
 ## Development & Testing
 
 ```bash
-# Run the complete test suite (69 tests)
+# Run the complete test suite
 uv run pytest -v
+
+# Run Phase 4 AI orchestration unit and integration tests specifically
+uv run pytest tests/unit/test_orchestration.py tests/integration/test_mcp_client.py -v
 
 # Run lint checks with Ruff
 uv run ruff check .

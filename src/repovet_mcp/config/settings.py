@@ -49,14 +49,50 @@ class Settings(BaseSettings):
         description="Base URL for GitHub API operations",
     )
 
-    # AI Provider Configuration (Optional for future Phase 2-4 analysis)
+    # AI Provider & Orchestration Configuration
     gemini_api_key: SecretStr | None = Field(
         default=None,
-        description="Google Gemini API key for qualitative analysis and evidence synthesis",
+        description="Google Gemini API key for qualitative analysis and tool orchestration",
     )
     ai_model: str = Field(
         default="gemini-2.0-flash",
-        description="Default AI model identifier for qualitative vetting",
+        description="Default AI model identifier for qualitative vetting and orchestration",
+    )
+    orchestration_timeout_seconds: float = Field(
+        default=120.0,
+        description="Overall timeout for a Gemini orchestration session in seconds",
+    )
+    mcp_timeout_seconds: float = Field(
+        default=30.0,
+        description="Per-tool call timeout for MCP clients in seconds",
+    )
+    max_orchestration_steps: int = Field(
+        default=10,
+        description="Maximum sequential tool-call iterations per orchestration session",
+    )
+
+    # GitHub MCP Server Client Configuration
+    github_mcp_command: str = Field(
+        default="npx",
+        description="Command to launch the official GitHub MCP server (e.g. npx or docker)",
+    )
+    github_mcp_args: list[str] = Field(
+        default_factory=lambda: ["-y", "@modelcontextprotocol/server-github"],
+        description="Arguments passed to the GitHub MCP server command",
+    )
+    github_mcp_token_env_var: str = Field(
+        default="GITHUB_PERSONAL_ACCESS_TOKEN",
+        description="Environment variable name used by the GitHub MCP server for authentication",
+    )
+
+    # Shinobi MCP Server Client Configuration
+    shinobi_mcp_command: str = Field(
+        default="repovet-mcp",
+        description="Command to launch the Shinobi MCP server for client orchestration",
+    )
+    shinobi_mcp_args: list[str] = Field(
+        default_factory=list,
+        description="Arguments passed to the Shinobi MCP server command",
     )
 
     # Configuration File Paths
@@ -136,6 +172,24 @@ class Settings(BaseSettings):
         # Validate GitHub API base URL
         if not self.github_api_url.startswith(("http://", "https://")):
             msg = f"Invalid GitHub API URL: '{self.github_api_url}' must start with http:// or https://"
+            raise ValueError(msg)
+
+    def validate_orchestration_config(self) -> None:
+        """Validate settings required specifically for AI orchestration and MCP clients."""
+        if not self.has_ai_auth:
+            msg = (
+                "Gemini API key is required for AI orchestration. "
+                "Set REPOVET_GEMINI_API_KEY in environment or .env."
+            )
+            raise ValueError(msg)
+        if self.orchestration_timeout_seconds <= 0:
+            msg = f"orchestration_timeout_seconds must be positive, got {self.orchestration_timeout_seconds}"
+            raise ValueError(msg)
+        if self.mcp_timeout_seconds <= 0:
+            msg = f"mcp_timeout_seconds must be positive, got {self.mcp_timeout_seconds}"
+            raise ValueError(msg)
+        if self.max_orchestration_steps <= 0:
+            msg = f"max_orchestration_steps must be positive, got {self.max_orchestration_steps}"
             raise ValueError(msg)
 
 

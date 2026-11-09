@@ -26,15 +26,118 @@ TOKEN_PATTERNS = [
     ),
 ]
 
+# Set of dynamic runtime secrets registered for scrubbing
+_DYNAMIC_SECRETS: set[str] = set()
 
-def redact_secrets(text: str) -> str:
-    """Mask known sensitive tokens, keys, and authorization headers in strings."""
+
+def register_secret_for_redaction(secret: str | None) -> None:
+    """Register an active runtime secret (e.g. API key or PAT) for automatic scrubbing."""
+    if secret:
+        clean = secret.strip()
+        if len(clean) >= 6:
+            _DYNAMIC_SECRETS.add(clean)
+
+
+def unregister_secret_for_redaction(secret: str | None) -> None:
+    """Unregister an active runtime secret."""
+    if secret:
+        _DYNAMIC_SECRETS.discard(secret.strip())
+
+
+def clear_registered_secrets() -> None:
+    """Clear all dynamically registered secrets."""
+    _DYNAMIC_SECRETS.clear()
+
+
+def redact_secrets(
+    text: str, extra_secrets: list[str] | set[str] | frozenset[str] | None = None
+) -> str:
+    """Mask known sensitive tokens, keys, authorization headers, and registered secrets in strings."""
     if not text:
         return ""
     sanitized = str(text)
+
+    # Scrub dynamically registered secrets first
+    all_dynamic = _DYNAMIC_SECRETS.union(extra_secrets or ())
+    for secret in all_dynamic:
+        if secret and len(secret) >= 6 and secret in sanitized:
+            sanitized = sanitized.replace(secret, "[REDACTED_SECRET]")
+
+    # Scrub regex patterns
     for pattern in TOKEN_PATTERNS:
         sanitized = pattern.sub("[REDACTED_SECRET]", sanitized)
     return sanitized
+
+
+# Whitelist of standard, non-sensitive environment variable names to preserve in child subprocesses
+SAFE_ENV_PASSTHROUGH_VARS = frozenset(
+    {
+        "PATH",
+        "HOME",
+        "TMPDIR",
+        "TEMP",
+        "TMP",
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "SYSTEMROOT",
+        "COMSPEC",
+        "PATHEXT",
+        "VIRTUAL_ENV",
+        "NODE_PATH",
+        "PYTHONPATH",
+    }
+)
+
+# Sensitive substrings that must NEVER be passed from the host environment to child MCP processes
+SENSITIVE_ENV_SUBSTRINGS = (
+    "KEY",
+    "SECRET",
+    "TOKEN",
+    "AUTH",
+    "PASS",
+    "CREDENTIAL",
+    "AWS_",
+    "GCP_",
+    "AZURE_",
+    "GEMINI_",
+)
+
+
+def build_isolated_subprocess_env(
+    custom_env: dict[str, str] | None = None,
+    allowed_passthrough: set[str] | frozenset[str] | None = None,
+) -> dict[str, str]:
+    """Construct a minimal, isolated environment for child MCP subprocesses.
+
+    Preserves safe runtime essentials (PATH, HOME, temporary directory) while strictly
+    filtering out host ambient secrets (e.g. GEMINI_API_KEY, AWS tokens, cloud credentials).
+
+    NOTE: Process environment variables may still be inspectable by local users with
+    sufficient privileges (e.g., via /proc/<pid>/environ on Linux). Sensitive credentials
+    should be protected through process isolation and least-privilege token scoping.
+    """
+    import os
+
+    passthrough_keys = allowed_passthrough or SAFE_ENV_PASSTHROUGH_VARS
+    isolated_env: dict[str, str] = {}
+
+    for key, val in os.environ.items():
+        if key in passthrough_keys:
+            key_upper = key.upper()
+            if not any(sub in key_upper for sub in SENSITIVE_ENV_SUBSTRINGS):
+                isolated_env[key] = val
+
+    # Overlay explicitly provided custom variables intended specifically for this child process
+    if custom_env:
+        for k, v in custom_env.items():
+            if v is not None:
+                isolated_env[k] = str(v)
+
+    return isolated_env
 
 
 def sanitize_unicode_for_pdf(text: str) -> str:
