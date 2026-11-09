@@ -5,8 +5,11 @@ from pathlib import Path
 import pytest
 
 from repovet_mcp.services.security import (
+    clear_registered_secrets,
     redact_secrets,
+    register_secret_for_redaction,
     sanitize_for_report,
+    unregister_secret_for_redaction,
     validate_audit_id,
     validate_repo_component,
     validate_repository_url_domain,
@@ -34,6 +37,32 @@ def test_redact_secrets() -> None:
 
     # None and empty strings
     assert redact_secrets("") == ""
+
+
+def test_dynamic_secret_redaction() -> None:
+    """Verify dynamically registered secrets are redacted and cleared appropriately."""
+    custom_secret = "super_confidential_session_key_998877"
+    try:
+        register_secret_for_redaction(custom_secret)
+        msg = f"Connecting using key {custom_secret} on host"
+        assert redact_secrets(msg) == "Connecting using key [REDACTED_SECRET] on host"
+
+        # Short secrets (<6 chars) are ignored
+        register_secret_for_redaction("abc")
+        msg2 = "Short abc secret"
+        assert redact_secrets(msg2) == "Short abc secret"
+
+        # Extra secrets in redact_secrets
+        assert (
+            redact_secrets("Token custom_one_time_key_44", extra_secrets={"custom_one_time_key_44"})
+            == "Token [REDACTED_SECRET]"
+        )
+
+        # Unregistering secret
+        unregister_secret_for_redaction(custom_secret)
+        assert redact_secrets(msg) == msg
+    finally:
+        clear_registered_secrets()
 
 
 def test_sanitize_for_report() -> None:

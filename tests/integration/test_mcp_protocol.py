@@ -63,3 +63,32 @@ async def test_mcp_protocol_stdio_lifecycle() -> None:
         traversal_res = await session.call_tool("check_hard_gates", {"audit_id": "../traversal_id"})
         assert traversal_res.is_error is True
         assert any("Invalid audit ID" in str(c.text) for c in traversal_res.content)
+
+
+@pytest.mark.asyncio
+async def test_mcp_protocol_cwd_independence(tmp_path: Path) -> None:
+    """Verify MCP server starts cleanly and lists tools regardless of current working directory."""
+    repo_root = Path(__file__).parent.parent.parent
+    src_dir = repo_root / "src"
+
+    import os
+
+    env = os.environ.copy()
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = f"{src_dir}:{existing_pythonpath}" if existing_pythonpath else str(src_dir)
+
+    server_params = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "repovet_mcp.server"],
+        cwd=str(tmp_path),
+        env=env,
+    )
+
+    async with (
+        stdio_client(server_params) as (read_stream, write_stream),
+        ClientSession(read_stream, write_stream) as session,
+    ):
+        init_res = await session.initialize()
+        assert init_res.server_info.name == "repovet-mcp"
+        tools_res = await session.list_tools()
+        assert len(tools_res.tools) >= 7

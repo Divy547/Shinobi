@@ -27,12 +27,12 @@ def clean_settings(monkeypatch: pytest.MonkeyPatch, project_root: Path) -> Setti
     """Provide a pristine Settings instance with explicit paths pointing to project configs."""
     # Ensure no environment variables interfere
     monkeypatch.delenv("REPOVET_GITHUB_TOKEN", raising=False)
-    monkeypatch.delenv("REPOVET_GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("REPOVET_ENVIRONMENT", raising=False)
     monkeypatch.delenv("REPOVET_LOG_LEVEL", raising=False)
     monkeypatch.delenv("REPOVET_SERVER_NAME", raising=False)
 
     return Settings(
+        _env_file=None,
         scoring_config_path=project_root / "config" / "scoring.yaml",
         thresholds_config_path=project_root / "config" / "thresholds.yaml",
         reports_dir=project_root / "reports",

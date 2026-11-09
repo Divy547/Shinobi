@@ -15,11 +15,8 @@ def test_default_settings(clean_settings: Settings) -> None:
     assert clean_settings.server_name == "repovet-mcp"
     assert clean_settings.server_version == "0.1.0"
     assert clean_settings.github_token is None
-    assert clean_settings.gemini_api_key is None
     assert clean_settings.has_github_auth is False
-    assert clean_settings.has_ai_auth is False
     assert clean_settings.github_api_url == "https://api.github.com"
-    assert clean_settings.ai_model == "gemini-2.0-flash"
 
 
 def test_settings_with_env_override(monkeypatch: pytest.MonkeyPatch, project_root: Path) -> None:
@@ -27,7 +24,6 @@ def test_settings_with_env_override(monkeypatch: pytest.MonkeyPatch, project_roo
     monkeypatch.setenv("REPOVET_ENVIRONMENT", "production")
     monkeypatch.setenv("REPOVET_LOG_LEVEL", "DEBUG")
     monkeypatch.setenv("REPOVET_GITHUB_TOKEN", "ghp_testtoken1234567890")
-    monkeypatch.setenv("REPOVET_GEMINI_API_KEY", "gemini_secret_key_abc")
 
     settings = Settings(
         scoring_config_path=project_root / "config" / "scoring.yaml",
@@ -39,9 +35,6 @@ def test_settings_with_env_override(monkeypatch: pytest.MonkeyPatch, project_roo
     assert isinstance(settings.github_token, SecretStr)
     assert settings.github_token.get_secret_value() == "ghp_testtoken1234567890"
     assert settings.has_github_auth is True
-    assert isinstance(settings.gemini_api_key, SecretStr)
-    assert settings.gemini_api_key.get_secret_value() == "gemini_secret_key_abc"
-    assert settings.has_ai_auth is True
 
 
 def test_scoring_yaml_structure(clean_settings: Settings) -> None:

@@ -490,34 +490,81 @@ def register_vetting_tools(
 
     @server.tool(
         name="analyze_repository",
-        description="Initialize an audit and collect repository metadata, commits, PRs, issues, and workflows from GitHub.",
+        description=(
+            "Mandatory first step for repository vetting. Ingests verified GitHub REST primary evidence "
+            "(metadata, commits, PRs, issues, community profile, workflows) into local snapshot storage "
+            "and returns an audit_id required for all downstream analysis."
+        ),
     )
     async def analyze_repository(target: str, audit_id: str | None = None) -> dict[str, Any]:
+        """Initialize an audit and collect repository primary data from GitHub REST API.
+
+        Args:
+            target: Repository identifier in 'owner/repo' format or full GitHub URL.
+            audit_id: Optional custom audit identifier (alphanumeric, dashes, underscores).
+                If omitted, an ID in the format 'audit_{owner}_{repo}_{timestamp}' is generated.
+
+        Returns:
+            Dictionary containing assigned audit_id, repository metadata, star/fork counts, and status.
+        """
         return await _safe_execute(
             "analyze_repository", handlers.analyze_repository(target, audit_id)
         )
 
     @server.tool(
         name="check_hard_gates",
-        description="Evaluate mandatory repository eligibility conditions (license validity, dormancy, default branch CI, installation safety).",
+        description=(
+            "Evaluate mandatory eligibility gates (OSI-approved license, dormancy/recent commits, "
+            "default branch CI pass/fail, and installation safety). Returns pass/fail status and critical blockers."
+        ),
     )
     async def check_hard_gates(audit_id: str) -> dict[str, Any]:
+        """Evaluate mandatory repository eligibility conditions.
+
+        Args:
+            audit_id: Identifier of an existing initialized repository audit.
+
+        Returns:
+            Dictionary containing gate evaluations, critical blockers count, and overall pass/fail boolean.
+        """
         return await _safe_execute("check_hard_gates", handlers.check_hard_gates(audit_id))
 
     @server.tool(
         name="calculate_responsiveness",
-        description="Calculate first human response times and triage velocity for PRs and issues, filtering out automated bot comments.",
+        description=(
+            "Calculate first human response times and triage velocity for PRs and issues. "
+            "Filters out automated bot comments and reviews to measure real maintainer engagement."
+        ),
     )
     async def calculate_responsiveness(audit_id: str) -> dict[str, Any]:
+        """Calculate maintainer responsiveness metrics with bot filtering.
+
+        Args:
+            audit_id: Identifier of an existing initialized repository audit.
+
+        Returns:
+            Dictionary containing PR median response hours, issue response rates, and bot filtering statistics.
+        """
         return await _safe_execute(
             "calculate_responsiveness", handlers.calculate_responsiveness(audit_id)
         )
 
     @server.tool(
         name="analyze_contribution_accessibility",
-        description="Evaluate contribution documentation (README, CONTRIBUTING, Code of Conduct) and newcomer/beginner issues.",
+        description=(
+            "Evaluate onboarding documentation (README, CONTRIBUTING, Code of Conduct) and newcomer accessibility "
+            "(good-first-issue labeling, newcomer PR merge rates, and issue hygiene)."
+        ),
     )
     async def analyze_contribution_accessibility(audit_id: str) -> dict[str, Any]:
+        """Evaluate onboarding clarity and newcomer accessibility.
+
+        Args:
+            audit_id: Identifier of an existing initialized repository audit.
+
+        Returns:
+            Dictionary containing documentation assessment and newcomer PR / issue metrics.
+        """
         return await _safe_execute(
             "analyze_contribution_accessibility",
             handlers.analyze_contribution_accessibility(audit_id),
@@ -525,23 +572,56 @@ def register_vetting_tools(
 
     @server.tool(
         name="calculate_scorecard",
-        description="Score repository across the 10 standardized criteria (0-2 scale, 20 max points) and determine the final verdict.",
+        description=(
+            "Execute the deterministic scoring engine across all 10 rubric criteria (0-2 scale, 20 max points). "
+            "Determines the immutable verdict (APPROVE, FLAG, REJECT) and persists the audit report and manifest."
+        ),
     )
     async def calculate_scorecard(audit_id: str) -> dict[str, Any]:
+        """Compute 10-criterion scorecard and immutable audit decision.
+
+        Args:
+            audit_id: Identifier of an existing initialized repository audit.
+
+        Returns:
+            Dictionary containing total score, percentage, verdict (APPROVE/FLAG/REJECT), and per-criterion scores.
+        """
         return await _safe_execute("calculate_scorecard", handlers.calculate_scorecard(audit_id))
 
     @server.tool(
         name="validate_evidence",
-        description="Validate evidence structure, citations, and confidence ratings, verifying all claims are grounded in primary data.",
+        description=(
+            "Verify evidence grounding and citations across all criteria. Ensures every finding is grounded "
+            "in primary GitHub data with explicit CONFIRMED/INFERRED/UNKNOWN confidence ratings."
+        ),
     )
     async def validate_evidence(audit_id: str) -> dict[str, Any]:
+        """Validate evidence grounding, citations, and confidence classifications.
+
+        Args:
+            audit_id: Identifier of an existing initialized repository audit.
+
+        Returns:
+            Dictionary containing validation results, verified citation percentages, and confidence breakdowns.
+        """
         return await _safe_execute("validate_evidence", handlers.validate_evidence(audit_id))
 
     @server.tool(
         name="generate_pdf_report",
-        description="Generate a professional multi-section PDF audit report in reports/generated/ including verdict, scorecard, and evidence appendix.",
+        description=(
+            "Generate an executive, tamper-evident multi-section PDF audit report in reports/generated/ "
+            "with verdict, scorecard, hard gates, and full evidence appendix, updating the SHA-256 integrity manifest."
+        ),
     )
     async def generate_pdf_report(audit_id: str) -> dict[str, Any]:
+        """Generate an executive PDF audit report.
+
+        Args:
+            audit_id: Identifier of an existing initialized repository audit.
+
+        Returns:
+            Dictionary containing generated PDF file path, file size in bytes, and generation status.
+        """
         return await _safe_execute("generate_pdf_report", handlers.generate_pdf_report(audit_id))
 
     return handlers

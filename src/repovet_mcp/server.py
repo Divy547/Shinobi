@@ -22,9 +22,19 @@ def create_server(settings: Settings | None = None) -> MCPServer:
         name=resolved_settings.server_name,
         version=resolved_settings.server_version,
         instructions=(
-            "RepoVet MCP: Autonomous open-source repository vetting server. "
-            "Exposes tools to investigate repositories across nine phases, "
-            "calculate 10-criterion scorecards, validate evidence, and generate audit reports."
+            "Shinobi (RepoVet MCP): Deterministic open-source repository vetting server.\n\n"
+            "Exposes 7 deterministic tools to investigate repositories, verify hard gates, "
+            "calculate 10-criterion scorecards (0-100), validate evidence grounding, and generate tamper-evident PDF reports.\n\n"
+            "Recommended Workflow:\n"
+            "1. analyze_repository(owner, repo, audit_id=None): Mandatory first step. Ingests verified GitHub REST primary evidence "
+            "into local snapshot storage and returns an audit_id.\n"
+            "2. Optional diagnostics: check_hard_gates(audit_id), calculate_responsiveness(audit_id), analyze_contribution_accessibility(audit_id).\n"
+            "3. calculate_scorecard(audit_id): Evaluates all 10 weighted vetting criteria and renders an immutable audit decision (APPROVE, FLAG, REJECT).\n"
+            "4. validate_evidence(audit_id): Verifies evidence grounding, URLs, and integrity against Shinobi's confidence taxonomy.\n"
+            "5. generate_pdf_report(audit_id): Compiles a formal ReportLab PDF report and SHA-256 integrity manifest.\n\n"
+            "Important Rules:\n"
+            "- Scores, hard gates, and decisions are computed deterministically from verified evidence and cannot be overridden by conversational AI.\n"
+            "- If independent GitHub MCP tools are used for exploration, clearly separate their observations from Shinobi-verified evidence."
         ),
     )
     register_vetting_tools(server, resolved_settings)
