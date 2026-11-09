@@ -1,4 +1,5 @@
-"""PDF and audit report generators.
+"""Reporting module for RepoVet MCP."""
 
-ReportLab PDF rendering will be introduced in subsequent phases.
-"""
+from repovet_mcp.reporting.pdf_generator import PDFReportGenerator
+
+__all__ = ["PDFReportGenerator"]

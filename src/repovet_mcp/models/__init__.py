@@ -5,6 +5,8 @@ from repovet_mcp.models.audit import (
     AuditReport,
     AuditTarget,
     CriterionScore,
+    HardGateResult,
+    HardGateStatus,
     Scorecard,
 )
 from repovet_mcp.models.evidence import (
@@ -29,5 +31,7 @@ __all__ = [
     "Finding",
     "FindingCategory",
     "FindingSeverity",
+    "HardGateResult",
+    "HardGateStatus",
     "Scorecard",
 ]

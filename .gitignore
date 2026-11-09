@@ -57,5 +57,8 @@ Thumbs.db
 # Output artifacts (preserve directory structure via .gitkeep)
 reports/*
 !reports/.gitkeep
+!reports/generated/
+reports/generated/*
+!reports/generated/.gitkeep
 data/*
 !data/.gitkeep

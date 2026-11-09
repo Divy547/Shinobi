@@ -9,22 +9,25 @@ except ImportError:
     from mcp.server.fastmcp import FastMCP as MCPServer  # type: ignore[no-redef]
 
 from repovet_mcp.config.settings import Settings, get_settings
+from repovet_mcp.tools.vetting_tools import register_vetting_tools
 
 logger = logging.getLogger("repovet_mcp")
 
 
 def create_server(settings: Settings | None = None) -> MCPServer:
-    """Create and configure the MCP server instance."""
+    """Create and configure the MCP server instance and register all tools."""
     resolved_settings = settings or get_settings()
-    return MCPServer(
+    server = MCPServer(
         name=resolved_settings.server_name,
         version=resolved_settings.server_version,
         instructions=(
             "RepoVet MCP: Autonomous open-source repository vetting server. "
             "Exposes tools to investigate repositories across nine phases, "
-            "calculate 10-criterion scorecards, and generate audit reports."
+            "calculate 10-criterion scorecards, validate evidence, and generate audit reports."
         ),
     )
+    register_vetting_tools(server, resolved_settings)
+    return server
 
 
 def main() -> None:

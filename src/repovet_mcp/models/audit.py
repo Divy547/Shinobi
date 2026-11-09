@@ -19,6 +19,28 @@ class AuditDecision(StrEnum):
     REJECT = "REJECT"
 
 
+class HardGateStatus(StrEnum):
+    """Status for an individual hard gate check."""
+
+    PASS = "PASS"
+    FAIL = "FAIL"
+    UNKNOWN = "UNKNOWN"
+
+
+class HardGateResult(BaseModel):
+    """Result of evaluating a mandatory repository eligibility condition."""
+
+    gate_id: str = Field(description="Unique hard gate identifier")
+    name: str = Field(description="Human-readable gate name")
+    status: HardGateStatus = Field(description="Evaluation outcome (PASS, FAIL, UNKNOWN)")
+    severity: str = Field(default="CRITICAL", description="Risk severity if failed")
+    reason: str = Field(description="Detailed explanation of the gate outcome")
+    evidence_ids: list[str] = Field(
+        default_factory=list,
+        description="IDs of evidence items supporting this gate result",
+    )
+
+
 class CriterionScore(BaseModel):
     """Evaluated score for a single criterion on the 0-2 scale."""
 
@@ -45,6 +67,14 @@ class AuditTarget(BaseModel):
         default=None,
         description="Specific commit SHA analyzed, if applicable",
     )
+    description: str | None = Field(
+        default=None,
+        description="Repository description from GitHub",
+    )
+    stars: int = Field(default=0, description="Star count")
+    forks: int = Field(default=0, description="Fork count")
+    open_issues: int = Field(default=0, description="Total open issues count")
+    license_spdx: str | None = Field(default=None, description="SPDX license ID if detected")
 
 
 class Scorecard(BaseModel):
@@ -80,6 +110,10 @@ class AuditReport(BaseModel):
     target: AuditTarget = Field(description="Target repository details")
     decision: AuditDecision = Field(description="Final evaluation decision verdict")
     scorecard: Scorecard = Field(description="Complete 10-criterion evaluation scorecard")
+    hard_gates: list[HardGateResult] = Field(
+        default_factory=list,
+        description="List of mandatory hard eligibility gate checks",
+    )
     findings: list[Finding] = Field(
         default_factory=list,
         description="List of individual audit observations and risks",
@@ -92,6 +126,18 @@ class AuditReport(BaseModel):
     disqualifiers_triggered: list[str] = Field(
         default_factory=list,
         description="List of critical disqualifiers or hard blockers triggered",
+    )
+    responsiveness_stats: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Calculated responsiveness and review velocity metrics",
+    )
+    activity_stats: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Calculated commit activity and cadence metrics",
+    )
+    accessibility_stats: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Calculated newcomer and onboarding accessibility metrics",
     )
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),

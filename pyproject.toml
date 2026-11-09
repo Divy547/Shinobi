@@ -81,7 +81,7 @@ indent-style = "space"
 minversion = "8.0"
 testpaths = ["tests"]
 asyncio_mode = "auto"
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 filterwarnings = [
     "ignore::DeprecationWarning",
 ]
