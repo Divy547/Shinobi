@@ -94,79 +94,103 @@ class HardGatesService:
         # -------------------------------------------------------------
         # 2. Dormancy Gate: Must have had commits or activity in the last 18 months
         # -------------------------------------------------------------
-        days_since_commit = activity_metrics.get("days_since_latest_commit", 9999)
+        commit_history_available = activity_metrics.get("commit_history_available", True)
+        days_since_commit = activity_metrics.get("days_since_latest_commit")
         is_archived = activity_metrics.get("is_archived", False)
         is_abandoned = activity_metrics.get("is_abandoned", False)
 
-        ev_activity = EvidenceItem(
-            id=f"{audit_id}_ev_gate_dormancy",
-            phase="phase_2_vitality_and_pulse",
-            source_type=EvidenceSourceType.GITHUB_API_REST,
-            source_endpoint=f"{repo_url}/commits",
-            collected_at=now,
-            confidence=EvidenceConfidence.CONFIRMED,
-            summary=f"Latest commit was {days_since_commit} days ago. Repository archived status: {is_archived}.",
-            verified=True,
-        )
-        evidence.append(ev_activity)
-
-        if is_archived:
+        if not commit_history_available or days_since_commit is None:
+            ev_activity = EvidenceItem(
+                id=f"{audit_id}_ev_gate_dormancy",
+                phase="phase_2_vitality_and_pulse",
+                source_type=EvidenceSourceType.GITHUB_API_REST,
+                source_endpoint=f"{repo_url}/commits",
+                collected_at=now,
+                confidence=EvidenceConfidence.UNKNOWN,
+                summary="Commit history could not be retrieved due to API collection error; vitality status is unverified.",
+                verified=False,
+            )
+            evidence.append(ev_activity)
             results.append(
                 HardGateResult(
                     gate_id="abandoned_repository",
                     name="Repository Vitality & Maintenance Status",
-                    status=HardGateStatus.FAIL,
-                    severity="CRITICAL",
-                    reason="Repository has been officially archived on GitHub (read-only).",
-                    evidence_ids=[ev_activity.id],
-                )
-            )
-            findings.append(
-                Finding(
-                    id=f"{audit_id}_find_archived",
-                    phase="phase_2_vitality_and_pulse",
-                    criterion_id="commit_activity",
-                    severity=FindingSeverity.CRITICAL,
-                    category=FindingCategory.ACTIVITY,
-                    title="Repository is Archived",
-                    description="Repository has been permanently archived by the maintainers.",
-                    evidence_ids=[ev_activity.id],
-                )
-            )
-        elif is_abandoned:
-            results.append(
-                HardGateResult(
-                    gate_id="abandoned_repository",
-                    name="Repository Vitality & Maintenance Status",
-                    status=HardGateStatus.FAIL,
-                    severity="CRITICAL",
-                    reason=f"Repository has been dormant for {days_since_commit} days (>18 months) with zero maintainer commits.",
-                    evidence_ids=[ev_activity.id],
-                )
-            )
-            findings.append(
-                Finding(
-                    id=f"{audit_id}_find_dormant",
-                    phase="phase_2_vitality_and_pulse",
-                    criterion_id="commit_activity",
-                    severity=FindingSeverity.CRITICAL,
-                    category=FindingCategory.ACTIVITY,
-                    title="Abandoned / Dormant Codebase",
-                    description=f"Zero commits for {days_since_commit} days indicates the project is no longer actively maintained.",
+                    status=HardGateStatus.UNKNOWN,
+                    severity="HIGH",
+                    reason="Commit history could not be retrieved from GitHub API due to a collection error; maintenance status is UNKNOWN and requires manual review.",
                     evidence_ids=[ev_activity.id],
                 )
             )
         else:
-            results.append(
-                HardGateResult(
-                    gate_id="abandoned_repository",
-                    name="Repository Vitality & Maintenance Status",
-                    status=HardGateStatus.PASS,
-                    severity="CRITICAL",
-                    reason=f"Repository is active. Latest commit was {days_since_commit} days ago.",
-                    evidence_ids=[ev_activity.id],
-                )
+            ev_activity = EvidenceItem(
+                id=f"{audit_id}_ev_gate_dormancy",
+                phase="phase_2_vitality_and_pulse",
+                source_type=EvidenceSourceType.GITHUB_API_REST,
+                source_endpoint=f"{repo_url}/commits",
+                collected_at=now,
+                confidence=EvidenceConfidence.CONFIRMED,
+                summary=f"Latest commit was {days_since_commit} days ago. Repository archived status: {is_archived}.",
+                verified=True,
             )
+            evidence.append(ev_activity)
+
+            if is_archived:
+                results.append(
+                    HardGateResult(
+                        gate_id="abandoned_repository",
+                        name="Repository Vitality & Maintenance Status",
+                        status=HardGateStatus.FAIL,
+                        severity="CRITICAL",
+                        reason="Repository has been officially archived on GitHub (read-only).",
+                        evidence_ids=[ev_activity.id],
+                    )
+                )
+                findings.append(
+                    Finding(
+                        id=f"{audit_id}_find_archived",
+                        phase="phase_2_vitality_and_pulse",
+                        criterion_id="commit_activity",
+                        severity=FindingSeverity.CRITICAL,
+                        category=FindingCategory.ACTIVITY,
+                        title="Repository is Archived",
+                        description="Repository has been permanently archived by the maintainers.",
+                        evidence_ids=[ev_activity.id],
+                    )
+                )
+            elif is_abandoned:
+                results.append(
+                    HardGateResult(
+                        gate_id="abandoned_repository",
+                        name="Repository Vitality & Maintenance Status",
+                        status=HardGateStatus.FAIL,
+                        severity="CRITICAL",
+                        reason=f"Repository has been dormant for {days_since_commit} days (>18 months) with zero maintainer commits.",
+                        evidence_ids=[ev_activity.id],
+                    )
+                )
+                findings.append(
+                    Finding(
+                        id=f"{audit_id}_find_dormant",
+                        phase="phase_2_vitality_and_pulse",
+                        criterion_id="commit_activity",
+                        severity=FindingSeverity.CRITICAL,
+                        category=FindingCategory.ACTIVITY,
+                        title="Abandoned / Dormant Codebase",
+                        description=f"Zero commits for {days_since_commit} days indicates the project is no longer actively maintained.",
+                        evidence_ids=[ev_activity.id],
+                    )
+                )
+            else:
+                results.append(
+                    HardGateResult(
+                        gate_id="abandoned_repository",
+                        name="Repository Vitality & Maintenance Status",
+                        status=HardGateStatus.PASS,
+                        severity="CRITICAL",
+                        reason=f"Repository is active. Latest commit was {days_since_commit} days ago.",
+                        evidence_ids=[ev_activity.id],
+                    )
+                )
 
         # -------------------------------------------------------------
         # 3. Default Branch CI Gate: CI must not be persistently broken

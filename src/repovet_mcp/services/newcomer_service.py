@@ -2,6 +2,8 @@
 
 from typing import Any
 
+from repovet_mcp.services.responsiveness_service import ResponsivenessService
+
 BEGINNER_LABELS = {
     "good first issue",
     "good-first-issue",
@@ -20,6 +22,13 @@ BEGINNER_LABELS = {
 class NewcomerService:
     """Evaluates newcomer PR merge velocity and beginner issue accessibility."""
 
+    def __init__(self) -> None:
+        self._responsiveness_service = ResponsivenessService()
+
+    def is_bot_user(self, user: dict[str, Any] | None) -> bool:
+        """Determine whether a user is an automated bot."""
+        return self._responsiveness_service.is_bot_user(user)
+
     def analyze_newcomers(
         self,
         issues: list[dict[str, Any]],
@@ -32,6 +41,8 @@ class NewcomerService:
         newcomer_prs_closed = 0
 
         for pr in pull_requests:
+            if self.is_bot_user(pr.get("user")):
+                continue
             assoc = pr.get("author_association", "NONE")
             is_newcomer = assoc in ("FIRST_TIME_CONTRIBUTOR", "FIRST_TIMER", "NONE")
             if is_newcomer:

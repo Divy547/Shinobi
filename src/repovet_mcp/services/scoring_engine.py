@@ -37,34 +37,121 @@ class ScoringEngine:
     ) -> tuple[Scorecard, AuditDecision, list[str]]:
         """Compute the 10 criteria scores, sum total, and evaluate final decision verdict."""
         logger.debug("Evaluating scorecard for audit ID: %s", audit_id)
-        evidence_id_map = {e.phase: e.id for e in evidence_list}
-        repo_desc = (raw_repository.get("description") or "").lower()
-        repo_topics = [t.lower() for t in raw_repository.get("topics", [])]
+        # Look up dedicated criterion evidence IDs with fallbacks
+        c1_ev_id = next(
+            (
+                e.id
+                for e in evidence_list
+                if "c1_gsoc" in e.id or e.phase == "phase_9_mentorship_and_gsoc"
+            ),
+            None,
+        )
+        c2_ev_id = next(
+            (
+                e.id
+                for e in evidence_list
+                if "c2_commits" in e.id
+                or (e.phase == "phase_2_vitality_and_pulse" and "gate" not in e.id)
+            ),
+            None,
+        )
+        c3_ev_id = next(
+            (
+                e.id
+                for e in evidence_list
+                if "c3_contributors" in e.id or e.phase == "phase_3_governance_and_culture"
+            ),
+            None,
+        )
+        c4_ev_id = next(
+            (
+                e.id
+                for e in evidence_list
+                if "c4_pr_response" in e.id or e.phase == "phase_4_responsiveness_and_velocity"
+            ),
+            None,
+        )
+        c5_ev_id = next(
+            (
+                e.id
+                for e in evidence_list
+                if "c5_issue_response" in e.id or e.phase == "phase_4_responsiveness_and_velocity"
+            ),
+            c4_ev_id,
+        )
+        c6_ev_id = next(
+            (
+                e.id
+                for e in evidence_list
+                if "c6_newcomer_prs" in e.id or e.phase == "phase_6_issue_hygiene_and_accessibility"
+            ),
+            None,
+        )
+        c7_ev_id = next(
+            (
+                e.id
+                for e in evidence_list
+                if "c7_beginner_issues" in e.id
+                or e.phase == "phase_6_issue_hygiene_and_accessibility"
+            ),
+            c6_ev_id,
+        )
+        c8_ev_id = next(
+            (
+                e.id
+                for e in evidence_list
+                if "c8_docs" in e.id or e.phase == "phase_5_documentation_and_onboarding"
+            ),
+            None,
+        )
+        c9_ev_id = next(
+            (
+                e.id
+                for e in evidence_list
+                if "c9_ci" in e.id
+                or (e.phase == "phase_7_ci_cd_and_testing" and "gate" not in e.id)
+            ),
+            None,
+        )
+        c10_ev_id = next(
+            (
+                e.id
+                for e in evidence_list
+                if "c10_community" in e.id or e.phase == "phase_3_governance_and_culture"
+            ),
+            c3_ev_id,
+        )
 
         criteria_scores: list[CriterionScore] = []
 
         # ---------------------------------------------------------------------
         # 1. GSoC History & Mentorship Track Record (phase_9_mentorship_and_gsoc)
         # ---------------------------------------------------------------------
-        has_gsoc_topic = any("gsoc" in t for t in repo_topics) or "gsoc" in repo_desc
-        open_beginner_count = newcomer_metrics.get("open_beginner_issues_count", 0)
+        has_gsoc_doc = documentation_metrics.get("has_gsoc_doc", False)
 
-        if has_gsoc_topic:
-            c1_score = 2
-            c1_rationale = (
-                "Verified GSoC participation signals or dedicated mentorship topics present."
-            )
-        elif open_beginner_count >= 3 or documentation_metrics.get("has_contributing"):
-            c1_score = 1
-            c1_rationale = (
-                "Open-source contribution guidance and newcomer issues present, but no explicit "
-                "formal GSoC program affiliation confirmed in public metadata."
-            )
+        if has_gsoc_doc:
+            if documentation_metrics.get("has_contributing") and documentation_metrics.get(
+                "has_readme"
+            ):
+                c1_score = 2
+                c1_rationale = (
+                    "Dedicated GSoC / project ideas document and structured contribution onboarding "
+                    "verified in repository contents."
+                )
+            else:
+                c1_score = 1
+                c1_rationale = (
+                    "Project ideas or mentorship document detected, but formal organization acceptance "
+                    "requires manual verification against official GSoC archives."
+                )
         else:
             c1_score = 0
-            c1_rationale = "No evidence of GSoC participation, mentorship track record, or structured student guidance."
+            c1_rationale = (
+                "Missing historical GSoC archive evidence. Actual GSoC organization participation "
+                "cannot be inferred from repository labels, topics, or generic newcomer issues; "
+                "marked UNKNOWN pending manual verification against official GSoC archives."
+            )
 
-        c1_ev_id = evidence_id_map.get("phase_9_mentorship_and_gsoc")
         criteria_scores.append(
             CriterionScore(
                 criterion_id="gsoc_history",
@@ -80,10 +167,17 @@ class ScoringEngine:
         # ---------------------------------------------------------------------
         # 2. Commit Activity & Maintenance Cadence (phase_2_vitality_and_pulse)
         # ---------------------------------------------------------------------
-        days_since_commit = activity_metrics.get("days_since_latest_commit", 9999)
+        commit_history_available = activity_metrics.get("commit_history_available", True)
+        days_since_commit = activity_metrics.get("days_since_latest_commit")
         commits_90d = activity_metrics.get("commits_last_90d", 0)
 
-        if days_since_commit <= 30 and commits_90d >= 10:
+        if not commit_history_available or days_since_commit is None:
+            c2_score = 0
+            c2_rationale = (
+                "Commit history could not be retrieved from GitHub API; maintenance cadence "
+                "is UNKNOWN and requires manual verification."
+            )
+        elif days_since_commit <= 30 and commits_90d >= 10:
             c2_score = 2
             c2_rationale = f"Vibrant activity: last commit {days_since_commit} days ago with {commits_90d} commits in the last 90 days."
         elif days_since_commit <= 180 and commits_90d >= 1:
@@ -93,7 +187,6 @@ class ScoringEngine:
             c2_score = 0
             c2_rationale = f"Dormant/Abandoned: {days_since_commit} days since last commit."
 
-        c2_ev_id = evidence_id_map.get("phase_2_vitality_and_pulse")
         criteria_scores.append(
             CriterionScore(
                 criterion_id="commit_activity",
@@ -122,7 +215,6 @@ class ScoringEngine:
             c3_score = 0
             c3_rationale = f"High bus factor risk: top contributor dominates {top_contrib_share}% of recorded contributions."
 
-        c3_ev_id = evidence_id_map.get("phase_3_governance_and_culture")
         criteria_scores.append(
             CriterionScore(
                 criterion_id="contributor_spread",
@@ -159,7 +251,6 @@ class ScoringEngine:
                 "No human pull request review samples were observed in evaluated pull requests."
             )
 
-        c4_ev_id = evidence_id_map.get("phase_4_responsiveness_and_velocity")
         criteria_scores.append(
             CriterionScore(
                 criterion_id="pr_first_response",
@@ -199,7 +290,7 @@ class ScoringEngine:
                 score=c5_score,
                 max_score=2,
                 rationale=c5_rationale,
-                evidence_ids=[c4_ev_id] if c4_ev_id else [],
+                evidence_ids=[c5_ev_id] if c5_ev_id else [],
             )
         )
 
@@ -219,7 +310,6 @@ class ScoringEngine:
             c6_score = 0
             c6_rationale = "Zero newcomer PRs merged in the evaluated pull request sample."
 
-        c6_ev_id = evidence_id_map.get("phase_6_issue_hygiene_and_accessibility")
         criteria_scores.append(
             CriterionScore(
                 criterion_id="newcomer_prs_merged",
@@ -235,6 +325,7 @@ class ScoringEngine:
         # ---------------------------------------------------------------------
         # 7. Beginner Issues & Newcomer Hygiene (phase_6_issue_hygiene_and_accessibility)
         # ---------------------------------------------------------------------
+        open_beginner_count = newcomer_metrics.get("open_beginner_issues_count", 0)
         if open_beginner_count >= 3:
             c7_score = 2
             c7_rationale = f"Curated beginner backlog: {open_beginner_count} open 'good first issue' / newcomer tasks available."
@@ -255,7 +346,7 @@ class ScoringEngine:
                 score=c7_score,
                 max_score=2,
                 rationale=c7_rationale,
-                evidence_ids=[c6_ev_id] if c6_ev_id else [],
+                evidence_ids=[c7_ev_id] if c7_ev_id else [],
             )
         )
 
@@ -278,7 +369,6 @@ class ScoringEngine:
             c8_score = 0
             c8_rationale = "Deficient documentation: Missing or empty README and no setup guide."
 
-        c8_ev_id = evidence_id_map.get("phase_5_documentation_and_onboarding")
         criteria_scores.append(
             CriterionScore(
                 criterion_id="docs_and_setup",
@@ -308,7 +398,6 @@ class ScoringEngine:
             c9_score = 0
             c9_rationale = "Untested: No automated CI workflows and no test directories detected."
 
-        c9_ev_id = evidence_id_map.get("phase_7_ci_cd_and_testing")
         criteria_scores.append(
             CriterionScore(
                 criterion_id="ci_and_code_quality",
@@ -327,15 +416,18 @@ class ScoringEngine:
         has_coc = documentation_metrics.get("has_code_of_conduct", False)
         has_discussions = documentation_metrics.get("has_discussions_enabled", False)
 
-        if has_coc and has_discussions:
-            c10_score = 2
-            c10_rationale = (
-                "Inclusive culture: Formal Code of Conduct and public GitHub Discussions enabled."
-            )
-        elif has_coc or has_discussions:
+        if has_coc:
             c10_score = 1
             c10_rationale = (
-                "Standard community health: Code of Conduct or community channels present."
+                "Standard: CODE_OF_CONDUCT.md present. Note: Real-time chat (Discord/Slack/Matrix) "
+                "and GitHub Discussions interaction activity are not collected via REST API and remain "
+                "unverified (cannot award exemplary score for unverified activity)."
+            )
+        elif has_discussions:
+            c10_score = 1
+            c10_rationale = (
+                "Discussions feature enabled, but Code of Conduct is absent and discussion "
+                "activity is unverified via REST API."
             )
         else:
             c10_score = 0
@@ -351,7 +443,7 @@ class ScoringEngine:
                 score=c10_score,
                 max_score=2,
                 rationale=c10_rationale,
-                evidence_ids=[c3_ev_id] if c3_ev_id else [],
+                evidence_ids=[c10_ev_id] if c10_ev_id else [],
             )
         )
 

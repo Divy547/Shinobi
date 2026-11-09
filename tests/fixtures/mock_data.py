@@ -11,6 +11,7 @@ def create_mock_repository_data(
     license_spdx: str = "Apache-2.0",
     days_since_latest_commit: int = 2,
     has_ci_failing: bool = False,
+    has_gsoc_ideas: bool = True,
 ) -> dict[str, Any]:
     """Generate a fully populated synthetic raw_data dictionary for testing."""
     now = datetime.now(UTC)
@@ -193,6 +194,8 @@ def create_mock_repository_data(
         {"name": "pyproject.toml", "type": "file", "size": 800},
         {"name": "tests", "type": "dir", "size": 0},
     ]
+    if has_gsoc_ideas:
+        root_contents.append({"name": "GSOC.md", "type": "file", "size": 1800})
 
     community_profile = {
         "health_percentage": 100,

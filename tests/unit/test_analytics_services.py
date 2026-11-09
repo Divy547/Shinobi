@@ -170,3 +170,76 @@ def test_hard_gates_service_unlicensed_failure() -> None:
     assert license_gate.status == HardGateStatus.FAIL
     assert len(findings) >= 1
     assert findings[0].severity == "CRITICAL"
+
+
+def test_newcomer_service_filters_bots() -> None:
+    """Verify that automated bot PRs are excluded from newcomer metrics."""
+    service = NewcomerService()
+    pulls = [
+        {
+            "number": 1,
+            "user": {"login": "dependabot[bot]", "type": "Bot"},
+            "author_association": "NONE",
+            "state": "closed",
+            "merged_at": "2026-11-01T00:00:00Z",
+        },
+        {
+            "number": 2,
+            "user": {"login": "renovate-bot", "type": "User"},
+            "author_association": "NONE",
+            "state": "closed",
+            "merged_at": "2026-11-02T00:00:00Z",
+        },
+        {
+            "number": 3,
+            "user": {"login": "human_newcomer", "type": "User"},
+            "author_association": "FIRST_TIME_CONTRIBUTOR",
+            "state": "closed",
+            "merged_at": "2026-11-03T00:00:00Z",
+        },
+    ]
+    res = service.analyze_newcomers(issues=[], pull_requests=pulls)
+    # Only the human newcomer should be counted
+    assert res["newcomer_prs_sample_count"] == 1
+    assert res["newcomer_prs_merged"] == 1
+    assert res["newcomer_merge_rate"] == 100.0
+
+
+def test_activity_service_collection_failure() -> None:
+    """Verify activity service marks history unavailable when API call failed."""
+    service = ActivityService()
+    res = service.analyze_activity(
+        repository_data={"archived": False},
+        commits=[],
+        releases=[],
+        commits_collection_failed=True,
+    )
+    assert res["commit_history_available"] is False
+    assert res["days_since_latest_commit"] is None
+    assert res["is_abandoned"] is False
+
+
+def test_hard_gates_service_commit_collection_failure_unknown() -> None:
+    """Verify hard gate returns UNKNOWN rather than CRITICAL failure when commits API fails."""
+    data = create_mock_repository_data()
+    act = ActivityService().analyze_activity(
+        data["repository"],
+        commits=[],
+        releases=[],
+        commits_collection_failed=True,
+    )
+    ci_sec = CISecurityService().analyze_ci_and_security(
+        data["repository"], data["workflows"], data["workflow_runs"], data["root_contents"]
+    )
+
+    service = HardGatesService()
+    gates, evidence, findings = service.evaluate_gates(
+        "test_audit_err", act, ci_sec, data["repository"]
+    )
+
+    dormancy_gate = next(g for g in gates if g.gate_id == "abandoned_repository")
+    assert dormancy_gate.status == HardGateStatus.UNKNOWN
+    assert dormancy_gate.severity == "HIGH"
+    assert "UNKNOWN" in dormancy_gate.reason
+    # Should not produce critical abandoned finding
+    assert not any(f.id.endswith("_find_dormant") for f in findings)

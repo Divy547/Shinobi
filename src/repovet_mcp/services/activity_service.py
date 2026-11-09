@@ -25,29 +25,38 @@ class ActivityService:
         commits: list[dict[str, Any]],
         releases: list[dict[str, Any]],
         now: datetime | None = None,
+        commits_collection_failed: bool = False,
     ) -> dict[str, Any]:
         """Compute commit recency, frequency across 30/90/365 days, and release cadence."""
         reference_time = now or datetime.now(UTC)
         is_archived = bool(repository_data.get("archived", False))
 
         # 1. Latest Commit Analysis
+        commit_history_available = not commits_collection_failed
         latest_commit_date: datetime | None = None
         latest_commit_sha: str | None = None
         commit_dates: list[datetime] = []
 
-        for commit in commits:
-            commit_meta = commit.get("commit", {})
-            committer_meta = commit_meta.get("committer", {}) or commit_meta.get("author", {})
-            dt = self._parse_dt(committer_meta.get("date"))
-            if dt:
-                commit_dates.append(dt)
-                if latest_commit_date is None or dt > latest_commit_date:
-                    latest_commit_date = dt
-                    latest_commit_sha = commit.get("sha")
+        if commit_history_available:
+            for commit in commits:
+                commit_meta = commit.get("commit", {})
+                committer_meta = commit_meta.get("committer", {}) or commit_meta.get("author", {})
+                dt = self._parse_dt(committer_meta.get("date"))
+                if dt:
+                    commit_dates.append(dt)
+                    if latest_commit_date is None or dt > latest_commit_date:
+                        latest_commit_date = dt
+                        latest_commit_sha = commit.get("sha")
 
-        days_since_latest_commit = (
-            (reference_time - latest_commit_date).days if latest_commit_date else 9999
-        )
+            days_since_latest_commit: int | None = (
+                (reference_time - latest_commit_date).days if latest_commit_date else 9999
+            )
+            is_dormant = days_since_latest_commit > 365 or is_archived
+            is_abandoned = days_since_latest_commit > 548  # >18 months
+        else:
+            days_since_latest_commit = None
+            is_dormant = is_archived
+            is_abandoned = False
 
         # 2. Commit frequency buckets
         commits_last_30d = sum(1 for dt in commit_dates if (reference_time - dt).days <= 30)
@@ -69,11 +78,8 @@ class ActivityService:
             (reference_time - latest_release_date).days if latest_release_date else None
         )
 
-        # 4. Vitality Status Assessment
-        is_dormant = days_since_latest_commit > 365 or is_archived
-        is_abandoned = days_since_latest_commit > 548  # >18 months
-
         return {
+            "commit_history_available": commit_history_available,
             "is_archived": is_archived,
             "is_dormant": is_dormant,
             "is_abandoned": is_abandoned,

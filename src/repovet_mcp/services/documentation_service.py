@@ -56,6 +56,15 @@ class DocumentationService:
         if repository_data:
             has_discussions = bool(repository_data.get("has_discussions", False))
 
+        # Check Dedicated GSoC / Project Ideas Documentation
+        has_gsoc_doc = any(
+            name.startswith("gsoc")
+            or "summer-of-code" in name
+            or "project-ideas" in name
+            or name in ("ideas.md", "ideas.rst", "ideas.txt")
+            for name in files_map
+        )
+
         return {
             "has_readme": has_readme,
             "readme_size_bytes": readme_size,
@@ -66,4 +75,5 @@ class DocumentationService:
             "has_pr_template": has_pr_template,
             "has_issue_template": has_issue_template,
             "has_discussions_enabled": has_discussions,
+            "has_gsoc_doc": has_gsoc_doc,
         }

@@ -104,22 +104,26 @@ class GitHubClient:
                 backoff *= 2
                 continue
 
-            # Check Rate Limit Headers
             remaining = response.headers.get("x-ratelimit-remaining")
-            if remaining is not None and int(remaining) <= 0:
-                reset_time = response.headers.get("x-ratelimit-reset", "unknown")
-                msg = f"GitHub API rate limit exhausted. Resets at: {reset_time}"
-                logger.error(msg)
-                raise RateLimitExceededError(msg)
-
             if response.status_code == 200:
+                if remaining is not None and int(remaining) <= 0:
+                    reset_time = response.headers.get("x-ratelimit-reset", "unknown")
+                    logger.warning(
+                        "GitHub API rate limit exhausted on successful response. Resets at: %s",
+                        reset_time,
+                    )
                 return response.json()
             if response.status_code == 404:
                 return None
             if response.status_code in (403, 429):
                 err_body = response.text
-                if "rate limit" in err_body.lower() or remaining == "0":
-                    msg = "GitHub API rate limit reached (HTTP 403/429)."
+                if (
+                    "rate limit" in err_body.lower()
+                    or remaining == "0"
+                    or (remaining is not None and int(remaining) <= 0)
+                ):
+                    reset_time = response.headers.get("x-ratelimit-reset", "unknown")
+                    msg = f"GitHub API rate limit reached (HTTP {response.status_code}). Resets at: {reset_time}"
                     raise RateLimitExceededError(msg)
                 if attempt > max_retries:
                     msg = (
@@ -128,6 +132,12 @@ class GitHubClient:
                     raise GitHubAPIError(msg)
                 await asyncio.sleep(backoff)
                 backoff *= 2
+                continue
+            if remaining is not None and int(remaining) <= 0:
+                reset_time = response.headers.get("x-ratelimit-reset", "unknown")
+                msg = f"GitHub API rate limit exhausted. Resets at: {reset_time}"
+                logger.error(msg)
+                raise RateLimitExceededError(msg)
                 continue
             if response.status_code >= 500:
                 if attempt > max_retries:
@@ -276,17 +286,7 @@ class GitHubClient:
             repo_meta = await self.get_repository(client, owner, repo)
 
             # 2. Concurrently fetch core collections
-            (
-                commits,
-                contributors,
-                all_issues,
-                pulls,
-                releases,
-                root_contents,
-                community_profile,
-                workflows,
-                workflow_runs,
-            ) = await asyncio.gather(
+            gathered = await asyncio.gather(
                 self.get_commits(client, owner, repo, per_page=100),
                 self.get_contributors(client, owner, repo, per_page=100),
                 self.get_issues(client, owner, repo, state="all", per_page=100),
@@ -298,6 +298,37 @@ class GitHubClient:
                 self.get_workflow_runs(client, owner, repo, per_page=25),
                 return_exceptions=True,
             )
+
+            collection_errors: dict[str, str] = {}
+            keys = [
+                "commits",
+                "contributors",
+                "issues",
+                "pull_requests",
+                "releases",
+                "root_contents",
+                "community_profile",
+                "workflows",
+                "workflow_runs",
+            ]
+            clean_results: dict[str, Any] = {}
+            for key, val in zip(keys, gathered, strict=True):
+                if isinstance(val, Exception):
+                    collection_errors[key] = str(val)
+                    logger.warning("Error fetching %s for %s/%s: %s", key, owner, repo, val)
+                    clean_results[key] = None
+                else:
+                    clean_results[key] = val
+
+            commits = clean_results["commits"]
+            contributors = clean_results["contributors"]
+            all_issues = clean_results["issues"]
+            pulls = clean_results["pull_requests"]
+            releases = clean_results["releases"]
+            root_contents = clean_results["root_contents"]
+            community_profile = clean_results["community_profile"]
+            workflows = clean_results["workflows"]
+            workflow_runs = clean_results["workflow_runs"]
 
             # Separate true issues from pull requests in the issues list
             raw_issues_list = all_issues if isinstance(all_issues, list) else []
@@ -348,4 +379,5 @@ class GitHubClient:
                 "sampled_issue_comments": sampled_issue_comments,
                 "sampled_pr_reviews": sampled_pr_reviews,
                 "sampled_pr_comments": sampled_pr_comments,
+                "errors": collection_errors,
             }

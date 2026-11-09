@@ -490,6 +490,14 @@ class PDFReportGenerator:
         resp = report.responsiveness_stats
         acc = report.accessibility_stats
 
+        days_commit = act.get("days_since_latest_commit")
+        days_str = f"{days_commit} days" if days_commit is not None else "N/A (Unavailable)"
+
+        median_pr_resp = resp.get("median_pr_first_response_hours")
+        pr_resp_str = (
+            f"{median_pr_resp} hours" if median_pr_resp is not None else "N/A (No response samples)"
+        )
+
         stats_data = [
             [
                 Paragraph("<b>Metric</b>", styles["TableCellBold"]),
@@ -498,9 +506,7 @@ class PDFReportGenerator:
             ],
             [
                 Paragraph("Days Since Last Commit", styles["TableCellBold"]),
-                Paragraph(
-                    f"{act.get('days_since_latest_commit', 'N/A')} days", styles["TableCell"]
-                ),
+                Paragraph(days_str, styles["TableCell"]),
                 Paragraph(
                     "&le; 30 days is excellent; &gt; 365 days is dormant", styles["TableCell"]
                 ),
@@ -512,10 +518,7 @@ class PDFReportGenerator:
             ],
             [
                 Paragraph("PR Median Human Response", styles["TableCellBold"]),
-                Paragraph(
-                    f"{resp.get('median_pr_first_response_hours', 'N/A')} hours",
-                    styles["TableCell"],
-                ),
+                Paragraph(pr_resp_str, styles["TableCell"]),
                 Paragraph("&lt; 72 hours recommended for active OSS/GSoC", styles["TableCell"]),
             ],
             [
@@ -691,12 +694,21 @@ class PDFReportGenerator:
                 Paragraph("<b>Grounded Observation Summary</b>", styles["TableCellBold"]),
             ]
         ]
-        for ev in report.evidence[:12]:
+        conf_colors = {
+            "CONFIRMED": "#15803d",
+            "INFERRED": "#2563eb",
+            "UNKNOWN": "#b45309",
+        }
+        for ev in report.evidence[:16]:
+            c_color = conf_colors.get(ev.confidence.value, "#475569")
             ev_rows.append(
                 [
                     Paragraph(ev.id, styles["TableCell"]),
                     Paragraph(ev.phase.replace("_", " ").title(), styles["TableCell"]),
-                    Paragraph(f"<b>{ev.confidence.value}</b>", styles["TableCellBold"]),
+                    Paragraph(
+                        f"<font color='{c_color}'><b>{ev.confidence.value}</b></font>",
+                        styles["TableCellBold"],
+                    ),
                     Paragraph(ev.source_endpoint or "API Endpoint", styles["TableCell"]),
                     Paragraph(ev.summary, styles["TableCell"]),
                 ]
@@ -731,6 +743,7 @@ class PDFReportGenerator:
                         "<b>Untrusted Repository Code Policy:</b> RepoVet MCP adheres strictly to a zero-execution policy. "
                         "Under no circumstances are external scripts, test runners, or build hooks from audited codebases executed. "
                         "All findings are derived exclusively through safe read-only API inspection and static analysis.<br/>"
+                        "<b>GSoC Mentorship & Community Channel Verification:</b> GSoC organization status is verified only when primary project ideas documents exist in repository contents; otherwise marked UNKNOWN pending verification against official Google Summer of Code archives. Similarly, GitHub Discussions and real-time chat (Discord/Slack/Matrix) interaction tone cannot be verified via public REST API endpoints and are scored conservatively.<br/>"
                         "<b>Determinism:</b> All numeric scores and velocity metrics are calculated deterministically in Python "
                         "and are 100% reproducible from cached raw payloads in <code>data/</code>.",
                         styles["Body"],

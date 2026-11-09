@@ -87,8 +87,12 @@ class VettingToolHandlers:
         workflows = raw_data.get("workflows", [])
         workflow_runs = raw_data.get("workflow_runs", [])
         root_contents = raw_data.get("root_contents", [])
+        collection_errors = raw_data.get("errors", {})
+        commits_failed = "commits" in collection_errors
 
-        activity_metrics = self.activity_service.analyze_activity(repo_meta, commits, releases)
+        activity_metrics = self.activity_service.analyze_activity(
+            repo_meta, commits, releases, commits_collection_failed=commits_failed
+        )
         ci_security_metrics = self.ci_security_service.analyze_ci_and_security(
             repo_meta, workflows, workflow_runs, root_contents
         )
@@ -165,8 +169,13 @@ class VettingToolHandlers:
         pr_reviews = raw_data.get("sampled_pr_reviews", {})
         pr_comments = raw_data.get("sampled_pr_comments", {})
 
+        collection_errors = raw_data.get("errors", {})
+        commits_failed = "commits" in collection_errors
+
         # Compute analytics
-        act_metrics = self.activity_service.analyze_activity(repo_meta, commits, releases)
+        act_metrics = self.activity_service.analyze_activity(
+            repo_meta, commits, releases, commits_collection_failed=commits_failed
+        )
         contrib_metrics = self.contributor_service.analyze_contributors(contributors)
         resp_metrics = self.responsiveness_service.analyze_responsiveness(
             issues, pulls, issue_comments, pr_reviews, pr_comments
@@ -184,120 +193,165 @@ class VettingToolHandlers:
             audit_id, act_metrics, ci_sec_metrics, repo_meta
         )
 
-        # Build grounded evidence items across all 9 phases
+        # Build grounded evidence items across all 10 scorecard criteria
         now = datetime.now(UTC)
         repo_url = repo_meta.get("html_url", "")
         evidence_list: list[EvidenceItem] = list(gate_evidence)
 
-        # Phase 2 Evidence
+        # Criterion 1 Evidence (Phase 9: GSoC History & Mentorship Track Record)
+        has_gsoc_doc = doc_metrics.get("has_gsoc_doc", False)
         evidence_list.append(
             EvidenceItem(
-                id=f"{audit_id}_ev_p2_activity",
+                id=f"{audit_id}_ev_c1_gsoc",
+                phase="phase_9_mentorship_and_gsoc",
+                source_type=EvidenceSourceType.GITHUB_API_REST,
+                source_endpoint=f"{repo_url}/contents",
+                collected_at=now,
+                confidence=EvidenceConfidence.CONFIRMED
+                if has_gsoc_doc
+                else EvidenceConfidence.UNKNOWN,
+                summary=(
+                    "Dedicated GSoC / project ideas document verified in repository contents."
+                    if has_gsoc_doc
+                    else "No confirmed GSoC archive record or project ideas document in repository contents; GSoC status is unverified."
+                ),
+                verified=has_gsoc_doc,
+            )
+        )
+
+        # Criterion 2 Evidence (Phase 2: Commit Activity & Cadence)
+        commit_hist_ok = act_metrics.get("commit_history_available", True)
+        evidence_list.append(
+            EvidenceItem(
+                id=f"{audit_id}_ev_c2_commits",
                 phase="phase_2_vitality_and_pulse",
                 source_type=EvidenceSourceType.GITHUB_API_REST,
                 source_endpoint=f"{repo_url}/commits",
                 collected_at=now,
-                confidence=EvidenceConfidence.CONFIRMED,
-                summary=f"Latest commit: {act_metrics.get('days_since_latest_commit')} days ago. Last 90d commits: {act_metrics.get('commits_last_90d')}.",
-                verified=True,
+                confidence=EvidenceConfidence.CONFIRMED
+                if commit_hist_ok
+                else EvidenceConfidence.UNKNOWN,
+                summary=(
+                    f"Latest commit: {act_metrics.get('days_since_latest_commit')} days ago. Last 90d commits: {act_metrics.get('commits_last_90d')}."
+                    if commit_hist_ok
+                    else "Commit history could not be retrieved due to API collection error."
+                ),
+                verified=commit_hist_ok,
             )
         )
 
-        # Phase 3 Evidence
+        # Criterion 3 Evidence (Phase 3: Contributor Spread & Decentralization)
         evidence_list.append(
             EvidenceItem(
-                id=f"{audit_id}_ev_p3_governance",
+                id=f"{audit_id}_ev_c3_contributors",
                 phase="phase_3_governance_and_culture",
                 source_type=EvidenceSourceType.GITHUB_API_REST,
                 source_endpoint=f"{repo_url}/contributors",
                 collected_at=now,
                 confidence=EvidenceConfidence.CONFIRMED,
-                summary=f"Total contributors: {contrib_metrics.get('total_contributors')}. Top contributor share: {contrib_metrics.get('top_contributor_share')}%. Discussions enabled: {doc_metrics.get('has_discussions_enabled')}.",
+                summary=f"Total contributors: {contrib_metrics.get('total_contributors')}. Top contributor share: {contrib_metrics.get('top_contributor_share')}%.",
                 verified=True,
             )
         )
 
-        # Phase 4 Evidence
+        # Criterion 4 Evidence (Phase 4: PR First Human Response Time)
         evidence_list.append(
             EvidenceItem(
-                id=f"{audit_id}_ev_p4_responsiveness",
+                id=f"{audit_id}_ev_c4_pr_response",
                 phase="phase_4_responsiveness_and_velocity",
                 source_type=EvidenceSourceType.GITHUB_API_REST,
                 source_endpoint=f"{repo_url}/pulls",
                 collected_at=now,
                 confidence=EvidenceConfidence.CONFIRMED,
-                summary=f"PR median human response: {resp_metrics.get('median_pr_first_response_hours')}h. Unanswered issues: {resp_metrics.get('unanswered_issue_percentage')}%.",
+                summary=f"PR median first human response: {resp_metrics.get('median_pr_first_response_hours')} hours across {resp_metrics.get('prs_with_human_response_count')} evaluated reviews.",
                 verified=True,
             )
         )
 
-        # Phase 5 Evidence
+        # Criterion 5 Evidence (Phase 4: Issue Human Response Rate)
         evidence_list.append(
             EvidenceItem(
-                id=f"{audit_id}_ev_p5_docs",
-                phase="phase_5_documentation_and_onboarding",
+                id=f"{audit_id}_ev_c5_issue_response",
+                phase="phase_4_responsiveness_and_velocity",
                 source_type=EvidenceSourceType.GITHUB_API_REST,
-                source_endpoint=f"{repo_url}/blob/main/README.md",
+                source_endpoint=f"{repo_url}/issues",
                 collected_at=now,
                 confidence=EvidenceConfidence.CONFIRMED,
-                summary=f"README present: {doc_metrics.get('has_readme')} ({doc_metrics.get('readme_size_bytes')} bytes). CONTRIBUTING: {doc_metrics.get('has_contributing')}.",
+                summary=f"Open issues evaluated: {resp_metrics.get('open_issues_evaluated')}. Unanswered issue percentage: {resp_metrics.get('unanswered_issue_percentage')}%.",
                 verified=True,
             )
         )
 
-        # Phase 6 Evidence
+        # Criterion 6 Evidence (Phase 6: Newcomer PRs Acceptance & Merge Rate)
         evidence_list.append(
             EvidenceItem(
-                id=f"{audit_id}_ev_p6_newcomers",
+                id=f"{audit_id}_ev_c6_newcomer_prs",
+                phase="phase_6_issue_hygiene_and_accessibility",
+                source_type=EvidenceSourceType.GITHUB_API_REST,
+                source_endpoint=f"{repo_url}/pulls",
+                collected_at=now,
+                confidence=EvidenceConfidence.CONFIRMED,
+                summary=f"Newcomer PRs merged: {newcomer_metrics.get('newcomer_prs_merged')}. Newcomer merge rate: {newcomer_metrics.get('newcomer_merge_rate')}%.",
+                verified=True,
+            )
+        )
+
+        # Criterion 7 Evidence (Phase 6: Beginner Issues & Newcomer Hygiene)
+        evidence_list.append(
+            EvidenceItem(
+                id=f"{audit_id}_ev_c7_beginner_issues",
                 phase="phase_6_issue_hygiene_and_accessibility",
                 source_type=EvidenceSourceType.GITHUB_API_REST,
                 source_endpoint=f"{repo_url}/issues",
                 collected_at=now,
                 confidence=EvidenceConfidence.CONFIRMED,
-                summary=f"Open beginner issues: {newcomer_metrics.get('open_beginner_issues_count')}. Newcomer PRs merged: {newcomer_metrics.get('newcomer_prs_merged')}.",
+                summary=f"Open beginner-labeled issues count: {newcomer_metrics.get('open_beginner_issues_count')}.",
                 verified=True,
             )
         )
 
-        # Phase 7 Evidence
+        # Criterion 8 Evidence (Phase 5: Documentation & Local Setup Clarity)
         evidence_list.append(
             EvidenceItem(
-                id=f"{audit_id}_ev_p7_testing",
+                id=f"{audit_id}_ev_c8_docs",
+                phase="phase_5_documentation_and_onboarding",
+                source_type=EvidenceSourceType.GITHUB_API_REST,
+                source_endpoint=f"{repo_url}/blob/main/README.md",
+                collected_at=now,
+                confidence=EvidenceConfidence.CONFIRMED,
+                summary=f"README present: {doc_metrics.get('has_readme')} ({doc_metrics.get('readme_size_bytes')} bytes). CONTRIBUTING guide: {doc_metrics.get('has_contributing')}.",
+                verified=True,
+            )
+        )
+
+        # Criterion 9 Evidence (Phase 7: CI Workflows & Automated Testing)
+        evidence_list.append(
+            EvidenceItem(
+                id=f"{audit_id}_ev_c9_ci",
                 phase="phase_7_ci_cd_and_testing",
                 source_type=EvidenceSourceType.GITHUB_API_REST,
                 source_endpoint=f"{repo_url}/actions",
                 collected_at=now,
                 confidence=EvidenceConfidence.CONFIRMED,
-                summary=f"CI Workflows: {ci_sec_metrics.get('has_ci_workflows')}. Default branch CI passing: {ci_sec_metrics.get('ci_passing_on_default_branch')}. Test dir: {ci_sec_metrics.get('has_tests_directory')}.",
+                summary=f"CI Workflows configured: {ci_sec_metrics.get('has_ci_workflows')}. Default branch passing: {ci_sec_metrics.get('ci_passing_on_default_branch')}. Tests directory: {ci_sec_metrics.get('has_tests_directory')}.",
                 verified=True,
             )
         )
 
-        # Phase 8 Evidence
+        # Criterion 10 Evidence (Phase 3: Community Tone & Discussion Channels)
+        has_coc = doc_metrics.get("has_code_of_conduct", False)
         evidence_list.append(
             EvidenceItem(
-                id=f"{audit_id}_ev_p8_security",
-                phase="phase_8_dependencies_and_security",
-                source_type=EvidenceSourceType.STATIC_ANALYSIS,
-                source_endpoint=repo_url,
-                collected_at=now,
-                confidence=EvidenceConfidence.CONFIRMED,
-                summary=f"License: {ci_sec_metrics.get('license_spdx')} (OSI: {ci_sec_metrics.get('is_osi_approved')}). Suspicious binaries: {ci_sec_metrics.get('suspicious_install_scripts')}.",
-                verified=True,
-            )
-        )
-
-        # Phase 9 Evidence
-        evidence_list.append(
-            EvidenceItem(
-                id=f"{audit_id}_ev_p9_mentorship",
-                phase="phase_9_mentorship_and_gsoc",
+                id=f"{audit_id}_ev_c10_community",
+                phase="phase_3_governance_and_culture",
                 source_type=EvidenceSourceType.GITHUB_API_REST,
-                source_endpoint=repo_url,
+                source_endpoint=f"{repo_url}/blob/main/CODE_OF_CONDUCT.md" if has_coc else repo_url,
                 collected_at=now,
-                confidence=EvidenceConfidence.INFERRED,
-                summary="Mentorship feasibility evaluated based on GSoC topics, newcomer issues, and contribution documentation.",
-                verified=True,
+                confidence=EvidenceConfidence.CONFIRMED if has_coc else EvidenceConfidence.UNKNOWN,
+                summary=(
+                    f"Code of Conduct present: {has_coc}. Discussions enabled: {doc_metrics.get('has_discussions_enabled')}. Note: Community chat/Discussions activity unverified via REST API."
+                ),
+                verified=has_coc,
             )
         )
 

@@ -58,6 +58,25 @@ async def test_github_client_rate_limit_exceeded() -> None:
 
 
 @pytest.mark.asyncio
+async def test_github_client_rate_limit_successful_response() -> None:
+    """Verify HTTP 200 with x-ratelimit-remaining=0 returns payload without error."""
+
+    def mock_final_call_handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"x-ratelimit-remaining": "0", "x-ratelimit-reset": "1790000000"},
+            json={"name": "test-repo", "stargazers_count": 42},
+        )
+
+    transport = httpx.MockTransport(mock_final_call_handler)
+    async with httpx.AsyncClient(transport=transport) as test_client:
+        gh = GitHubClient()
+        data = await gh._request(test_client, "/repos/owner/test-repo")
+        assert data["name"] == "test-repo"
+        assert data["stargazers_count"] == 42
+
+
+@pytest.mark.asyncio
 async def test_github_client_repo_not_found() -> None:
     """Verify RepositoryNotFoundError is raised when repo returns 404."""
 
@@ -69,3 +88,33 @@ async def test_github_client_repo_not_found() -> None:
         gh = GitHubClient()
         with pytest.raises(RepositoryNotFoundError, match="not found"):
             await gh.get_repository(test_client, "owner", "missing-repo")
+
+
+@pytest.mark.asyncio
+async def test_collect_repository_data_tracks_errors() -> None:
+    """Verify collect_repository_data captures partial endpoint errors in errors dictionary."""
+
+    def mock_partial_failure_handler(request: httpx.Request) -> httpx.Response:
+        url_path = request.url.path
+        if url_path == "/repos/owner/repo":
+            return httpx.Response(200, json={"name": "repo", "owner": {"login": "owner"}})
+        if "commits" in url_path:
+            return httpx.Response(500, text="Internal Server Error")
+        return httpx.Response(200, json=[])
+
+    transport = httpx.MockTransport(mock_partial_failure_handler)
+    gh = GitHubClient()
+    # monkeypatch httpx.AsyncClient inside collect_repository_data
+    original_client = httpx.AsyncClient
+
+    def mock_async_client(**kwargs: object) -> httpx.AsyncClient:
+        kwargs["transport"] = transport
+        return original_client(**kwargs)  # type: ignore[arg-type]
+
+    import unittest.mock
+
+    with unittest.mock.patch("httpx.AsyncClient", side_effect=mock_async_client):
+        result = await gh.collect_repository_data("owner", "repo")
+        assert "errors" in result
+        assert "commits" in result["errors"]
+        assert result["commits"] == []

@@ -102,3 +102,207 @@ def test_evidence_validator_unsupported_finding() -> None:
 
     assert results["is_valid"] is False
     assert "find_unsupported" in results["unsupported_findings"]
+
+
+def test_evidence_validator_full_scorecard_grounding() -> None:
+    """Verify that a 10-criterion scorecard with dedicated evidence items validates cleanly."""
+    from repovet_mcp.config.settings import Settings
+    from repovet_mcp.services.activity_service import ActivityService
+    from repovet_mcp.services.ci_security_service import CISecurityService
+    from repovet_mcp.services.contributor_service import ContributorService
+    from repovet_mcp.services.documentation_service import DocumentationService
+    from repovet_mcp.services.hard_gates_service import HardGatesService
+    from repovet_mcp.services.newcomer_service import NewcomerService
+    from repovet_mcp.services.responsiveness_service import ResponsivenessService
+    from repovet_mcp.services.scoring_engine import ScoringEngine
+    from repovet_mcp.tools.vetting_tools import VettingToolHandlers
+    from tests.fixtures.mock_data import create_mock_repository_data
+
+    data = create_mock_repository_data()
+    handlers = VettingToolHandlers(Settings())
+    audit_id = "test_audit_grounding"
+    handlers.storage.save_raw_data(audit_id, data)
+
+    act = ActivityService().analyze_activity(data["repository"], data["commits"], data["releases"])
+    contrib = ContributorService().analyze_contributors(data["contributors"])
+    resp = ResponsivenessService().analyze_responsiveness(
+        data["issues"],
+        data["pull_requests"],
+        data["sampled_issue_comments"],
+        data["sampled_pr_reviews"],
+        data["sampled_pr_comments"],
+    )
+    newcomer = NewcomerService().analyze_newcomers(data["issues"], data["pull_requests"])
+    doc = DocumentationService().analyze_documentation(
+        data["root_contents"], data["community_profile"], data["repository"]
+    )
+    ci_sec = CISecurityService().analyze_ci_and_security(
+        data["repository"], data["workflows"], data["workflow_runs"], data["root_contents"]
+    )
+    gates, gate_evidence, gate_findings = HardGatesService().evaluate_gates(
+        audit_id, act, ci_sec, data["repository"]
+    )
+
+    # Use handlers logic or build full evidence list
+    now = data["commits"][0]["commit"]["committer"]["date"]
+    from datetime import datetime
+
+    collected_now = datetime.fromisoformat(now)
+
+    evidence_list = list(gate_evidence)
+    evidence_list.append(
+        EvidenceItem(
+            id=f"{audit_id}_ev_c1_gsoc",
+            phase="phase_9_mentorship_and_gsoc",
+            source_type=EvidenceSourceType.GITHUB_API_REST,
+            source_endpoint="https://github.com/test-org/sample-lib/contents",
+            collected_at=collected_collected_at
+            if (collected_collected_at := collected_now)
+            else collected_now,
+            confidence=EvidenceConfidence.CONFIRMED,
+            summary="GSoC ideas doc verified.",
+            verified=True,
+        )
+    )
+    evidence_list.append(
+        EvidenceItem(
+            id=f"{audit_id}_ev_c2_commits",
+            phase="phase_2_vitality_and_pulse",
+            source_type=EvidenceSourceType.GITHUB_API_REST,
+            source_endpoint="https://github.com/test-org/sample-lib/commits",
+            collected_at=collected_now,
+            confidence=EvidenceConfidence.CONFIRMED,
+            summary="Commits verified.",
+            verified=True,
+        )
+    )
+    evidence_list.append(
+        EvidenceItem(
+            id=f"{audit_id}_ev_c3_contributors",
+            phase="phase_3_governance_and_culture",
+            source_type=EvidenceSourceType.GITHUB_API_REST,
+            source_endpoint="https://github.com/test-org/sample-lib/contributors",
+            collected_at=collected_now,
+            confidence=EvidenceConfidence.CONFIRMED,
+            summary="Contributors verified.",
+            verified=True,
+        )
+    )
+    evidence_list.append(
+        EvidenceItem(
+            id=f"{audit_id}_ev_c4_pr_response",
+            phase="phase_4_responsiveness_and_velocity",
+            source_type=EvidenceSourceType.GITHUB_API_REST,
+            source_endpoint="https://github.com/test-org/sample-lib/pulls",
+            collected_at=collected_now,
+            confidence=EvidenceConfidence.CONFIRMED,
+            summary="PR response verified.",
+            verified=True,
+        )
+    )
+    evidence_list.append(
+        EvidenceItem(
+            id=f"{audit_id}_ev_c5_issue_response",
+            phase="phase_4_responsiveness_and_velocity",
+            source_type=EvidenceSourceType.GITHUB_API_REST,
+            source_endpoint="https://github.com/test-org/sample-lib/issues",
+            collected_at=collected_now,
+            confidence=EvidenceConfidence.CONFIRMED,
+            summary="Issue response verified.",
+            verified=True,
+        )
+    )
+    evidence_list.append(
+        EvidenceItem(
+            id=f"{audit_id}_ev_c6_newcomer_prs",
+            phase="phase_6_issue_hygiene_and_accessibility",
+            source_type=EvidenceSourceType.GITHUB_API_REST,
+            source_endpoint="https://github.com/test-org/sample-lib/pulls",
+            collected_at=collected_now,
+            confidence=EvidenceConfidence.CONFIRMED,
+            summary="Newcomer PRs verified.",
+            verified=True,
+        )
+    )
+    evidence_list.append(
+        EvidenceItem(
+            id=f"{audit_id}_ev_c7_beginner_issues",
+            phase="phase_6_issue_hygiene_and_accessibility",
+            source_type=EvidenceSourceType.GITHUB_API_REST,
+            source_endpoint="https://github.com/test-org/sample-lib/issues",
+            collected_at=collected_now,
+            confidence=EvidenceConfidence.CONFIRMED,
+            summary="Beginner issues verified.",
+            verified=True,
+        )
+    )
+    evidence_list.append(
+        EvidenceItem(
+            id=f"{audit_id}_ev_c8_docs",
+            phase="phase_5_documentation_and_onboarding",
+            source_type=EvidenceSourceType.GITHUB_API_REST,
+            source_endpoint="https://github.com/test-org/sample-lib/blob/main/README.md",
+            collected_at=collected_now,
+            confidence=EvidenceConfidence.CONFIRMED,
+            summary="Docs verified.",
+            verified=True,
+        )
+    )
+    evidence_list.append(
+        EvidenceItem(
+            id=f"{audit_id}_ev_c9_ci",
+            phase="phase_7_ci_cd_and_testing",
+            source_type=EvidenceSourceType.GITHUB_API_REST,
+            source_endpoint="https://github.com/test-org/sample-lib/actions",
+            collected_at=collected_now,
+            confidence=EvidenceConfidence.CONFIRMED,
+            summary="CI verified.",
+            verified=True,
+        )
+    )
+    evidence_list.append(
+        EvidenceItem(
+            id=f"{audit_id}_ev_c10_community",
+            phase="phase_3_governance_and_culture",
+            source_type=EvidenceSourceType.GITHUB_API_REST,
+            source_endpoint="https://github.com/test-org/sample-lib/blob/main/CODE_OF_CONDUCT.md",
+            collected_at=collected_now,
+            confidence=EvidenceConfidence.CONFIRMED,
+            summary="Community verified.",
+            verified=True,
+        )
+    )
+
+    scorecard, decision, _ = ScoringEngine().evaluate_scorecard(
+        audit_id=audit_id,
+        activity_metrics=act,
+        contributor_metrics=contrib,
+        responsiveness_metrics=resp,
+        newcomer_metrics=newcomer,
+        documentation_metrics=doc,
+        ci_security_metrics=ci_sec,
+        hard_gates=gates,
+        evidence_list=evidence_list,
+        raw_repository=data["repository"],
+    )
+
+    report = AuditReport(
+        audit_id=audit_id,
+        target=AuditTarget(
+            owner="test-org",
+            repo="sample-lib",
+            url="https://github.com/test-org/sample-lib",
+        ),
+        decision=decision,
+        scorecard=scorecard,
+        hard_gates=gates,
+        findings=gate_findings,
+        evidence=evidence_list,
+        summary="Audit summary",
+    )
+
+    validation = EvidenceValidator().validate_audit_evidence(report)
+    assert validation["is_valid"] is True
+    assert len(validation["unsupported_criteria"]) == 0
+    assert len(validation["unsupported_findings"]) == 0
+    assert validation["total_evidence_count"] >= 14
